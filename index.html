@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plinko Infinite</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="side">
+        <div class="mode-control">
+          <label class="mode-toggle">
+            <span>Double or Nothing</span>
+            <input id="gameMode" type="checkbox" role="switch" aria-describedby="modeNote" />
+          </label>
+          <p id="modeNote" class="mode-note">Switching starts a new game.</p>
+        </div>
+        <div class="field">
+          <span class="label">Balance</span>
+          <div id="balance" class="balance">$5.00</div>
+        </div>
+
+        <div id="tiers" class="tiers"></div>
+        <p id="dropStatus" class="mode-note" role="status" hidden>Waiting for balls to land…</p>
+        <button id="allIn" class="tier all-in" hidden>
+          <span id="allInLabel">Drop Ball · All In</span>
+          <span id="allInAmount" class="all-in-amount">$100.00</span>
+        </button>
+        <p id="allInRules" class="mode-note" hidden>Start with $100. One ball at a time. Below $10 ends the game.</p>
+
+        <div class="board-settings">
+          <label class="field">
+            <span class="label">Risk</span>
+            <select id="risk">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="label">Rows</span>
+            <select id="rows"></select>
+          </label>
+        </div>
+
+        <div class="side-foot">
+          <button id="mute" class="icon-btn" title="Toggle sound">🔊</button>
+          <button id="reset" class="reset-btn" title="Start over from $5">↺ New Game</button>
+          <div class="peak">Best <span id="peak">$5.00</span></div>
+        </div>
+      </aside>
+
+      <main class="stage">
+        <canvas id="board"></canvas>
+        <div id="history" class="history"></div>
+      </main>
+
+      <aside class="tune">
+        <h3>Tuning</h3>
+        <label class="field">
+          <span class="label">Luck <output id="luckValue"></output></span>
+          <input id="luck" type="range" step="1" />
+        </label>
+        <div class="range-ends"><span>−50%</span><span>0</span><span>+50%</span></div>
+        <p id="luckNote" class="tune-note"></p>
+
+        <h3 class="tune-section">Ball physics</h3>
+        <label class="field">
+          <span class="label">Ball size <output id="ballSizeValue"></output></span>
+          <input id="ballSize" type="range" />
+        </label>
+        <div class="range-ends"><span>Small</span><span>Large</span></div>
+
+        <label class="field">
+          <span class="label">Weight <output id="weightValue"></output></span>
+          <input id="weight" type="range" />
+        </label>
+        <div class="range-ends"><span>Floaty</span><span>Heavy</span></div>
+
+        <label class="field">
+          <span class="label">Bounciness <output id="bounceValue"></output></span>
+          <input id="bounce" type="range" />
+        </label>
+        <div class="range-ends"><span>Dead</span><span>Pinball</span></div>
+
+        <button id="resetPhysics" class="reset-btn">Reset physics</button>
+      </aside>
+
+      <div id="over" class="over" hidden>
+        <div class="over-card">
+          <h2>Busted</h2>
+          <p>Your balance fell below <span id="overMinimum">$1</span>. You ended on <strong id="overFinal"></strong>.</p>
+          <div class="over-stats">
+            <div><span>Balls dropped</span><strong id="overDrops"></strong></div>
+            <div><span>Best balance</span><strong id="overPeak"></strong></div>
+          </div>
+          <button id="restart" class="drop">Play Again</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

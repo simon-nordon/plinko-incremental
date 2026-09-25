@@ -1,0 +1,176 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import Matter from 'matter-js';
+import { Board } from '../src/board';
+import { DEFAULT_PHYSICS, MAX_ROWS, MIN_ROWS, type PhysicsSettings } from '../src/config';
+
+const STEP = 1 / 120;
+const canvas = { getContext: () => ({}) } as unknown as HTMLCanvasElement;
+// Inspect physical state without adding a test-only interface to the game.
+const state = (board: Board) => board as unknown as {
+  engine: Matter.Engine;
+  balls: { body: Matter.Body; r: number }[];
+};
+
+function seeded<T>(fn: () => T): T {
+  const original = Math.random;
+  let seed = 417;
+  Math.random = () => {
+    seed = (1664525 * seed + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  try { return fn(); } finally { Math.random = original; }
+}
+
+/** A controlled, slightly off-centre impact on the top middle pin. */
+function rebound(bounce: number, changeAfterSpawn?: number): { height: number; upwardSpeed: number } {
+  let hits = 0;
+  const board = new Board(canvas, { onPegHit() { hits++; }, onLand() {} });
+  board.setPhysics({ ...DEFAULT_PHYSICS, bounce });
+  board.setLayout(16, []);
+  board.drop(0);
+  seeded(() => board.update(STEP));
+  const ball = state(board).balls[0].body;
+  Matter.Body.setPosition(ball, { x: 380.5, y: 0 });
+  Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+  if (changeAfterSpawn !== undefined) board.setPhysics({ ...DEFAULT_PHYSICS, bounce: changeAfterSpawn });
+  for (let i = 0; i < 120 && hits === 0; i++) board.update(STEP);
+  assert.ok(hits > 0, 'ball must strike the pin');
+  const impactY = ball.position.y;
+  const upwardSpeed = -ball.velocity.y;
+  let minY = impactY;
+  for (let i = 0; i < 120 && ball.velocity.y < 0; i++) {
+    board.update(STEP);
+    minY = Math.min(minY, ball.position.y);
+  }
+  return { height: impactY - minY, upwardSpeed };
+}
+
+test('default ball visibly rebounds upward; bounce slider increases rebound', () => {
+  const dead = rebound(0.3);
+  const normal = rebound(DEFAULT_PHYSICS.bounce);
+  const bumper = rebound(2);
+  // Reference damping still leaves an upward arc of most of the ball's 8 px radius.
+  assert.ok(normal.height > 6, `expected a visible arc, got ${normal.height.toFixed(2)} px`);
+  assert.ok(normal.height > dead.height * 2);
+  assert.ok(bumper.upwardSpeed > normal.upwardSpeed + 1, 'pinball impulse must survive collision resolution');
+});
+
+test('changing bounce affects new balls and preserves an existing ball rebound', () => {
+  assert.deepEqual(rebound(2, 0.3), rebound(2));
+  assert.deepEqual(rebound(0.3, 5), rebound(0.3));
+});
+
+test('balls spawn clear of the chute walls at either edge for every ball size', () => {
+  const original = Math.random;
+  try {
+    for (let rows = MIN_ROWS; rows <= MAX_ROWS; rows++) {
+      for (const ballSize of [0.5, 2, 2.5]) {
+        for (const edge of [0, 1]) {
+          Math.random = () => edge;
+          const board = new Board(canvas, { onPegHit() {}, onLand() {} });
+          board.setLayout(rows, []);
+          board.setPhysics({ ...DEFAULT_PHYSICS, ballSize });
+          board.drop(0);
+          board.update(STEP);
+          const { engine, balls } = state(board);
+          const obstacles = Matter.Composite.allBodies(engine.world).filter(b => b.isStatic);
+          assert.equal(Matter.Query.collides(balls[0].body, obstacles).length, 0);
+        }
+      }
+    }
+  } finally { Math.random = original; }
+});
+
+test('default drops reach actual buckets on every layout without timeout payouts', () => seeded(() => {
+  for (let rows = MIN_ROWS; rows <= MAX_ROWS; rows++) {
+    let landed = 0;
+    let body: Matter.Body;
+    let radius = 0;
+    let hits = 0;
+    const board = new Board(canvas, {
+      onPegHit() { hits++; },
+      onLand(bucket, tier) {
+        landed++;
+        assert.equal(tier, 0);
+        assert.ok(bucket >= 0 && bucket < board.buckets);
+        assert.ok(body.position.y + radius >= 565, `${rows} rows: ball timed out above the buckets`);
+      },
+    });
+    board.setLayout(rows, []);
+    for (let drop = 0; drop < 40; drop++) {
+      board.drop(0);
+      let elapsed = 0;
+      while (board.active && elapsed < 31) {
+        board.update(STEP);
+        const ball = state(board).balls[0];
+        if (ball) {
+          body = ball.body;
+          radius = ball.r;
+          assert.ok(Number.isFinite(body.position.x + body.position.y));
+        }
+        elapsed += STEP;
+      }
+      assert.equal(board.active, 0, `${rows} rows: drop stuck`);
+    }
+    assert.equal(landed, 40);
+    assert.ok(hits / landed > rows, `${rows} rows: balls should repeatedly bounce through the pins`);
+  }
+}));
+
+test('fixed-step results match at 30, 60 and 144 Hz, including queued drops', () => {
+  const run = (fps: number) => seeded(() => {
+    const landings: number[] = [];
+    const board = new Board(canvas, { onPegHit() {}, onLand(k) { landings.push(k); } });
+    board.setLayout(16, []);
+    for (let i = 0; i < 12; i++) board.drop(i % 5);
+    for (let i = 0; i < fps * 40 && board.active; i++) board.update(1 / fps);
+    assert.equal(board.active, 0);
+    assert.equal(landings.length, 12);
+    return landings;
+  });
+  assert.deepEqual(run(30), run(60));
+  assert.deepEqual(run(144), run(60));
+});
+
+test('queued balls return the matching wager IDs even when they land out of order', () => seeded(() => {
+  const landed = new Map<number, number>();
+  const board = new Board(canvas, {
+    onPegHit() {},
+    onLand(_bucket, tier, wagerId) {
+      assert.equal(landed.has(wagerId), false);
+      landed.set(wagerId, tier);
+    },
+  });
+  board.setLayout(16, []);
+  for (let tier = 0; tier < 5; tier++) board.drop(tier, 100 + tier);
+  for (let tick = 0; tick < 60 * 40 && board.active; tick++) board.update(1 / 60);
+  assert.equal(board.active, 0);
+  assert.equal(landed.size, 5);
+  for (let tier = 0; tier < 5; tier++) assert.equal(landed.get(100 + tier), tier);
+}));
+
+test('rapid mixed-size drops remain finite and pay out exactly once at slider extremes', () => seeded(() => {
+  for (const rows of [8, 16]) {
+    for (const weight of [0.25, 1.5]) {
+      let landed = 0;
+      const board = new Board(canvas, { onPegHit() {}, onLand() { landed++; } });
+      board.setLayout(rows, []);
+      for (let i = 0; i < 16; i++) {
+        const physics: PhysicsSettings = { ballSize: i % 2 ? 0.5 : 2.5, bounce: i % 2 ? 5 : 0.3, weight };
+        board.setPhysics(physics);
+        board.drop(i % 5);
+        for (let tick = 0; tick < 24; tick++) board.update(STEP);
+      }
+      for (let tick = 0; tick < 120 * 45 && board.active; tick++) {
+        board.update(STEP);
+        for (const { body } of state(board).balls) {
+          assert.ok(Number.isFinite(body.position.x + body.position.y + body.speed));
+          assert.ok(body.speed <= 16.001, 'bumper energy must stay bounded');
+        }
+      }
+      assert.equal(board.active, 0);
+      assert.equal(landed, 16);
+    }
+  }
+}));
