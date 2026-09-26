@@ -16,6 +16,7 @@ import {
 import { fmt, fmtChange, fmtMoney, fmtMult } from './format';
 import { GameRun, type GameMode } from './game';
 import { payoutTable } from './payouts';
+import { resetAllProgress } from './progress';
 import { affordableTiers, type BallTier } from './tiers';
 import { SkillTree, LifeSkills, SKILLS, startingDropAt, type SkillKind } from './skills';
 
@@ -38,6 +39,8 @@ const el = {
   luckValue: $('luckValue'),
   luckNote: $('luckNote'),
   resetPhysics: $<HTMLButtonElement>('resetPhysics'),
+  resetProgress: $<HTMLButtonElement>('resetProgress'),
+  resetProgressStatus: $('resetProgressStatus'),
   peak: $('peak'),
   history: $('history'),
   over: $('over'),
@@ -437,6 +440,28 @@ el.mute.addEventListener('click', () => {
   sfx.unlock();
   savePrefs();
   render();
+});
+let progressResetArmed = 0;
+el.resetProgress.addEventListener('click', () => {
+  if (!progressResetArmed) {
+    el.resetProgress.textContent = 'Confirm reset all progress';
+    el.resetProgressStatus.textContent = 'Tap again within 5 seconds to erase both modes, all upgrades and settings.';
+    progressResetArmed = window.setTimeout(() => {
+      progressResetArmed = 0;
+      el.resetProgress.textContent = 'Reset all progress';
+      el.resetProgressStatus.textContent = 'Dev tool: clears both modes, upgrades and settings in this browser.';
+    }, 5000);
+    return;
+  }
+  window.clearTimeout(progressResetArmed);
+  progressResetArmed = 0;
+  el.resetProgress.textContent = 'Reset all progress';
+  try {
+    resetAllProgress(localStorage);
+    window.location.reload();
+  } catch {
+    el.resetProgressStatus.textContent = 'Could not reset saved progress. Please try again.';
+  }
 });
 // Space drops the cheapest visible ball; 1–5 map to the current five buttons.
 window.addEventListener('keydown', (e) => {

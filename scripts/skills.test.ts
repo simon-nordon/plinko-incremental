@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { GameRun } from '../src/game';
 import { SkillTree, LifeSkills, SKILLS, CHARGES, pegIds, interiorPegIds, luckyBucketReturn, startingDropAt } from '../src/skills';
 import { payoutTable } from '../src/payouts';
+import { resetAllProgress } from '../src/progress';
 
 function memoryStorage() {
   const items = new Map<string, string>();
@@ -13,6 +14,25 @@ function earned(balance = 1000): GameRun {
   run.settle(run.drop(0)!.id, balance / run.houseStake);
   return run;
 }
+
+test('developer reset clears both modes and legacy saves without touching other site data', () => {
+  const keys = ['plinko-prefs', 'plinko-prefs-classic', 'plinko-prefs-double',
+    'plinko-skills-classic-v3', 'plinko-skills-double-v1', 'plinko-skills-double-v2',
+    'plinko-skills-double-v3', 'unrelated-preference'];
+  const items = new Map(keys.map(key => [key, 'saved']));
+  resetAllProgress({
+    get length() { return items.size; },
+    key: index => [...items.keys()][index] ?? null,
+    removeItem: key => { items.delete(key); },
+  });
+  assert.deepEqual([...items.keys()], ['unrelated-preference']);
+  const fresh = new SkillTree('double', {
+    getItem: key => items.get(key) ?? null,
+    setItem: (key, value) => { items.set(key, value); },
+  });
+  assert.equal(fresh.startingDrop, 10);
+  for (const kind of SKILLS) assert.equal(fresh.level(kind), 0);
+});
 
 test('charge prices are halved, grow independently, and spend earned money', () => {
   const tree = new SkillTree('double', memoryStorage());

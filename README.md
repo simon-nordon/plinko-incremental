@@ -19,6 +19,8 @@ History reports the net result of the entire drop, including all children. The h
 
 Progress is stored in your browser for the current site address; localhost, Cloudflare tunnels, and GitHub Pages have separate saves.
 
+The default ball size is 1.8× the peg radius. Under **Tuning → Development**, **Reset all progress** clears both modes' upgrades, settings, and legacy saves in this browser, then reloads a fresh game. Tap twice within five seconds to confirm.
+
 ## Local development
 
 Use Node.js 22 and npm:

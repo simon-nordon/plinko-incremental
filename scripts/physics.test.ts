@@ -148,7 +148,8 @@ test('changing bounce affects new balls and preserves an existing ball rebound',
 
 test('charged pegs add a fixed tangent kick for both grazing and head-on hits', () => {
   for (const bounce of [0.3, DEFAULT_PHYSICS.bounce, 2]) {
-    for (const x of [368.8, 380.5, 391.2]) {
+    const grazingOffset = 4 * (1 + DEFAULT_PHYSICS.ballSize) * .85;
+    for (const x of [380 - grazingOffset, 380.5, 380 + grazingOffset]) {
       const normal = rebound(bounce, undefined, false, x);
       const upgraded = rebound(bounce, undefined, true, x);
       const tangent = normal.tangentSpeed + BOUNCY_PEG_KICK * Math.sign(normal.tangentSpeed);

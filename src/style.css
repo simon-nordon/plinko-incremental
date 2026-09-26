@@ -269,6 +269,8 @@ select:disabled {
   border-color: var(--muted);
 }
 
+.dev-reset { color: #fda4af; border-color: #9f4556; min-height: 44px; }
+
 .peak span {
   color: var(--text);
   font-weight: 600;

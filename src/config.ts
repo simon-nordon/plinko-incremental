@@ -93,10 +93,10 @@ export interface PhysicsSettings {
   bounce: number;
 }
 
-export const DEFAULT_PHYSICS: PhysicsSettings = { ballSize: 2, weight: 1, bounce: 0.8 };
+export const DEFAULT_PHYSICS: PhysicsSettings = { ballSize: 1.8, weight: 1, bounce: 0.8 };
 
 /** Bump to replace saved tuning preferences when the default physics preset changes. */
-export const PHYSICS_VERSION = 3;
+export const PHYSICS_VERSION = 4;
 
 /** [min, max, step] for each Tuning slider. */
 export const PHYSICS_RANGES: Record<keyof PhysicsSettings, [number, number, number]> = {
