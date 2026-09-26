@@ -96,19 +96,19 @@ test('every life loses strictly below 10% of its starting amount', () => {
   }
 });
 
-test('Double loss threshold follows the peak and survives spending', () => {
+test('Double loss threshold is 5% of peak with a 10% starting floor', () => {
   const game = earned(2000);
-  assert.equal(game.minimumBet, 200);
-  assert.equal(game.spend(1800.01), false);
+  assert.equal(game.minimumBet, 100);
+  assert.equal(game.spend(1900.01), false);
   assert.equal(game.balance, 2000);
-  assert.equal(game.spend(1800), true);
-  assert.equal(game.minimumBet, 200);
+  assert.equal(game.spend(1900), true);
+  assert.equal(game.minimumBet, 100);
   const wager = game.drop(0)!;
   game.duplicate(wager.id);
   game.settle(wager.id, .5, .5);
   assert.equal(game.busted, false);
-  game.settle(wager.id, .49995, .5);
-  assert.equal(game.balance, 199.99);
+  game.settle(wager.id, .4999, .5);
+  assert.equal(game.balance, 99.99);
   assert.equal(game.busted, true);
   assert.equal(new GameRun('double').minimumBet, 1);
 });
