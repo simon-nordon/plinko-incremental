@@ -50,6 +50,16 @@ const el = {
   skills: $<HTMLDialogElement>('skills'),
   closeSkills: $<HTMLButtonElement>('closeSkills'),
   buyBouncy: $<HTMLButtonElement>('buyBouncy'),
+  selectBouncy: $<HTMLButtonElement>('selectBouncy'),
+  selectReturn: $<HTMLButtonElement>('selectReturn'),
+  bouncyDetail: $('bouncyDetail'),
+  returnDetail: $('returnDetail'),
+  returnNodeLevel: $('returnNodeLevel'),
+  returnBonus: $('returnBonus'),
+  returnBalance: $('returnBalance'),
+  returnNext: $('returnNext'),
+  returnStatus: $('returnStatus'),
+  buyReturn: $<HTMLButtonElement>('buyReturn'),
   skillCount: $('skillCount'),
   nodeLevel: $('nodeLevel'),
   pegCount: $('pegCount'),
@@ -119,11 +129,13 @@ function applyLayout(): void {
 
 /** Luck adjusts every reference multiplier by the same percentage. */
 function applyLuck(): void {
-  board.setMults(payoutTable(risk, rows, luck));
+  const payouts = payoutTable(risk, rows, luck);
+  board.setMults(skills?.improvePayouts(payouts) ?? payouts);
   el.luckValue.textContent = (luck > 0 ? '+' : luck < 0 ? '−' : '') + Math.abs(luck) + '%';
   el.luckNote.textContent = luck === 0
     ? 'Original reference payouts.'
-    : `Every base payout × ${(1 + luck / 100).toFixed(2)}. A 2× bucket pays ${fmtMult(2 * (1 + luck / 100))}.`;
+      : `Every base payout × ${(1 + luck / 100).toFixed(2)}. A 2× bucket pays ${fmtMult(2 * (1 + luck / 100))}.`;
+  if (skills?.returnLevel) el.luckNote.textContent += ` Bucket Return adds another +${skills.returnLevel * 5}% (×${skills.returnMultiplier.toFixed(2)}) to these payouts.`;
 }
 
 // ---- physics tuning ----
@@ -284,7 +296,7 @@ function renderSkills(): void {
   const level = skills?.level ?? 0;
   const available = skills?.available(rows).length ?? 0;
   const active = pegIds(rows).length - available;
-  el.skillCount.textContent = `${level} owned`;
+  el.skillCount.textContent = `${level + (skills?.returnLevel ?? 0)} owned`;
   el.nodeLevel.textContent = `Level ${level}`;
   el.pegCount.textContent = String(level);
   el.skillBalance.textContent = fmtMoney(run.balance);
@@ -297,6 +309,18 @@ function renderSkills(): void {
     : available === 0 ? (rows < MAX_ROWS ? 'Add more rows to upgrade more pegs.' : 'Every peg is permanently upgraded.')
     : run.balance < (skills?.cost ?? 50) ? `Need ${fmtMoney((skills?.cost ?? 50) - run.balance)} more.`
     : run.balance - (skills?.cost ?? 50) < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : 'Paid from your current balance.');
+  const returnLevel = skills?.returnLevel ?? 0;
+  const returnCost = skills?.returnCost ?? 50;
+  el.returnNodeLevel.textContent = `Level ${returnLevel}`;
+  el.returnBonus.textContent = `+${returnLevel * 5}%`;
+  el.returnNext.textContent = `Next level: +${(returnLevel + 1) * 5}% to every bucket. A base 2× bucket becomes ${fmtMult(2 * (1 + (returnLevel + 1) * .05))} before Luck.`;
+  el.returnBalance.textContent = fmtMoney(run.balance);
+  el.buyReturn.disabled = !skills?.canBuyReturn(run);
+  el.buyReturn.textContent = Number.isFinite(returnCost) ? `Upgrade · ${fmtMoney(returnCost)}` : 'Maximum level reached';
+  el.returnStatus.textContent = skillMessage || (run.active ? 'Wait for your ball to land.'
+    : run.busted ? 'Start a new run to earn more money.'
+    : run.balance < returnCost ? `Need ${fmtMoney(returnCost - run.balance)} more.`
+    : run.balance - returnCost < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : 'Paid from your current balance.');
 }
 
 // ---- wiring ----
@@ -322,6 +346,29 @@ el.openSkills.addEventListener('click', () => {
   el.skills.showModal();
 });
 el.closeSkills.addEventListener('click', () => el.skills.close());
+function selectSkill(bucketReturn: boolean): void {
+  el.bouncyDetail.hidden = bucketReturn;
+  el.returnDetail.hidden = !bucketReturn;
+  el.selectBouncy.setAttribute('aria-pressed', String(!bucketReturn));
+  el.selectReturn.setAttribute('aria-pressed', String(bucketReturn));
+  if (skills) skillMessage = '';
+  renderSkills();
+}
+el.selectBouncy.addEventListener('click', () => selectSkill(false));
+el.selectReturn.addEventListener('click', () => selectSkill(true));
+el.buyReturn.addEventListener('click', () => {
+  try {
+    if (!skills?.buyReturn(run)) return;
+    applyLuck();
+    sfx.unlock();
+    sfx.buy();
+    skillMessage = `Bucket Return upgraded to +${skills.returnLevel * 5}%. Permanently saved.`;
+    if (run.busted) { el.skills.close(); bust(); }
+  } catch {
+    skillMessage = 'Could not save the upgrade. No money was spent. Please try again.';
+  }
+  render();
+});
 el.buyBouncy.addEventListener('click', () => {
   try {
     const id = skills?.buy(run, rows);

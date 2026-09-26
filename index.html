@@ -114,10 +114,13 @@
         <div class="skill-map" aria-label="Double or Nothing skill tree">
           <div class="tree-root">DOUBLE OR NOTHING</div>
           <div class="tree-branch"></div>
-          <div class="skill-node"><span class="peg-symbol" aria-hidden="true">↟</span><strong>Bouncy Peg</strong><span id="nodeLevel">Level 0</span></div>
+          <div class="skill-nodes">
+            <button id="selectBouncy" class="skill-node" aria-pressed="true"><span class="peg-symbol" aria-hidden="true">↟</span><strong>Bouncy Peg</strong><span id="nodeLevel">Level 0</span></button>
+            <button id="selectReturn" class="skill-node return-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">+%</span><strong>Bucket Return</strong><span id="returnNodeLevel">Level 0</span></button>
+          </div>
           <span class="permanent-tag">Permanent upgrade</span>
         </div>
-        <section class="skill-detail" aria-labelledby="bouncyTitle">
+        <section id="bouncyDetail" class="skill-detail" aria-labelledby="bouncyTitle">
           <p class="eyebrow">Board upgrade</p>
           <h3 id="bouncyTitle">Bouncy Peg</h3>
           <p>Turn one random ordinary peg purple. Balls rebound off it with <strong>2× the normal bounce</strong>.</p>
@@ -127,6 +130,18 @@
             <p class="mode-note">Each purchase upgrades another peg. Cost doubles each time.</p>
             <button id="buyBouncy" class="buy-skill">Upgrade · $50</button>
             <p id="skillStatus" class="mode-note" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+        <section id="returnDetail" class="skill-detail" aria-labelledby="returnTitle" hidden>
+          <p class="eyebrow">Payout upgrade</p>
+          <h3 id="returnTitle">Bucket Return</h3>
+          <p>Increase every bucket's return by <strong>5% per level</strong>. Bonuses add up: +5%, +10%, +15%… and stack with Luck.</p>
+          <div class="skill-stats"><div><span>Current bonus</span><strong id="returnBonus">+0%</strong></div><div><span>Your balance</span><strong id="returnBalance">$100</strong></div></div>
+          <p id="returnNext" class="mode-note"></p>
+          <div class="skill-buy-area">
+            <p class="mode-note">Permanent across runs. Cost doubles each time.</p>
+            <button id="buyReturn" class="buy-skill">Upgrade · $50</button>
+            <p id="returnStatus" class="mode-note" role="status" aria-live="polite"></p>
           </div>
         </section>
       </div>
