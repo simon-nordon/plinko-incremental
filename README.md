@@ -8,6 +8,7 @@ A browser-based Plinko game built with TypeScript, Vite, and Matter.js.
 - **Double or Nothing:** start with $100 and wager your entire balance on one ball. A balance below $10 ends the run.
 - **Permanent skills:** Double or Nothing has its own skill tree. Bouncy Peg turns a random peg purple with twice the normal rebound. It costs $50 initially and doubles in price with each purchase.
 - **Bucket Return:** permanently improves every Double or Nothing bucket by 5% per level (+5%, +10%, +15%…). This bonus multiplies the Luck-adjusted payouts. Its separate cost starts at $50 and doubles per purchase.
+- **Pity:** a one-time $50 permanent unlock for Double or Nothing. Every bucket returns an extra 5% when your balance before the drop is below $100. Stacks with Bucket Return and Luck; the temporary $0 balance during an all-in drop does not trigger it.
 
 Upgrades survive losing and restarting. Progress is stored in your browser for the current site address; localhost, Cloudflare tunnels, and GitHub Pages have separate saves.
 

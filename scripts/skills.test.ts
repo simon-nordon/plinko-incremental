@@ -9,6 +9,81 @@ function memoryStorage() {
   return { getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => { items.set(key, value); } };
 }
 
+test('Pity uses the pre-drop balance: below $100 qualifies, exactly $100 and above do not', () => {
+  const tree = new SkillTree('double', memoryStorage());
+  assert.equal(tree.pityActive(50), false);
+  assert.ok(tree.buyPity(new GameRun('double')));
+  for (const [balance, expected] of [[99.99, 1.05], [100, 1], [100.01, 1], [10, 1.05]]) {
+    const run = new GameRun('double');
+    run.balance = balance;
+    const before = tree.improvePayouts([.1, 1, 110], run.balance);
+    const bet = run.drop(0)!;
+    assert.equal(run.balance, 0);
+    const during = tree.improvePayouts([.1, 1, 110], run.balance + run.inPlay);
+    assert.deepEqual(during, before);
+    assert.deepEqual(during, [.1, 1, 110].map(n => n * expected));
+    const result = run.settle(bet.id, during[1])!;
+    assert.equal(result.payout, Math.round(balance * expected * 100) / 100);
+  }
+});
+
+test('Pity stacks with other bonuses and follows balance changes between drops', () => {
+  const tree = new SkillTree('double', memoryStorage());
+  const run = new GameRun('double');
+  run.balance = 200;
+  tree.buyReturn(run);
+  tree.buyPity(run);
+  assert.equal(run.balance, 100);
+  assert.equal(tree.pityActive(run.balance), false);
+  const bet = run.drop(0)!;
+  run.settle(bet.id, .5);
+  assert.equal(tree.pityActive(run.balance), true);
+  const base = payoutTable('medium', 16, 10);
+  assert.deepEqual(tree.improvePayouts(base, run.balance), base.map(n => n * 1.05 * 1.05));
+  const next = run.drop(0)!;
+  run.settle(next.id, 3);
+  assert.equal(tree.pityActive(run.balance), false);
+});
+
+test('Pity is a one-time purchase retained alongside older skills after death and reload', () => {
+  const storage = memoryStorage();
+  storage.setItem('plinko-skills-double-v1', JSON.stringify({ version: 1, bouncyPegs: ['0:1'], returnLevel: 2 }));
+  const tree = new SkillTree('double', storage);
+  assert.equal(tree.hasPity, false);
+  const run = new GameRun('double');
+  run.balance = 50;
+  assert.ok(tree.buyPity(run));
+  assert.equal(run.busted, true);
+  const restored = new SkillTree('double', storage);
+  assert.equal(restored.hasPity, true);
+  assert.equal(restored.returnLevel, 2);
+  assert.deepEqual(restored.bouncyPegs, ['0:1']);
+  const fresh = new GameRun('double');
+  assert.equal(restored.buyPity(fresh), false);
+  assert.equal(fresh.balance, 100);
+  restored.buy(fresh, 8);
+  assert.equal(new SkillTree('double', storage).hasPity, true);
+  const classic = new SkillTree('classic', storage);
+  assert.equal(classic.buyPity(new GameRun('double')), false);
+  assert.deepEqual(classic.improvePayouts([1, 2], 50), [1, 2]);
+  assert.equal(tree.buyPity(new GameRun('classic')), false);
+});
+
+test('Pity purchase fails safely when in flight, unaffordable or unable to save', () => {
+  const tree = new SkillTree('double', memoryStorage());
+  const run = new GameRun('double');
+  const bet = run.drop(0)!;
+  assert.equal(tree.buyPity(run), false);
+  run.settle(bet.id, .2);
+  assert.equal(tree.buyPity(run), false);
+  assert.equal(run.balance, 20);
+  const broken = new SkillTree('double', { getItem: () => null, setItem() { throw new Error('quota'); } });
+  const fresh = new GameRun('double');
+  assert.throws(() => broken.buyPity(fresh));
+  assert.equal(fresh.balance, 100);
+  assert.equal(broken.hasPity, false);
+});
+
 test('Bucket Return adds 5% per level, stacks with Luck and pays the displayed return', () => {
   const tree = new SkillTree('double', memoryStorage());
   const run = new GameRun('double');

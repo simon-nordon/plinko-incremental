@@ -11,6 +11,7 @@ const validPegs = new Set(pegIds(MAX_ROWS));
 export class SkillTree {
   private owned: string[] = [];
   private returns = 0;
+  private pity = false;
   readonly key: string;
 
   constructor(readonly mode: GameMode, private storage: Storage) {
@@ -21,11 +22,13 @@ export class SkillTree {
     if (saved.version !== 1 || !Array.isArray(saved.bouncyPegs)
       || saved.bouncyPegs.some((id: unknown) => typeof id !== 'string' || !validPegs.has(id))
       || new Set(saved.bouncyPegs).size !== saved.bouncyPegs.length
-      || (saved.returnLevel !== undefined && (!Number.isSafeInteger(saved.returnLevel) || saved.returnLevel < 0))) {
+      || (saved.returnLevel !== undefined && (!Number.isSafeInteger(saved.returnLevel) || saved.returnLevel < 0))
+      || (saved.pity !== undefined && typeof saved.pity !== 'boolean')) {
       throw new Error('Invalid skill save');
     }
     this.owned = [...saved.bouncyPegs];
     this.returns = saved.returnLevel ?? 0;
+    this.pity = saved.pity ?? false;
   }
 
   get bouncyPegs(): readonly string[] { return this.mode === 'double' ? this.owned : []; }
@@ -34,8 +37,24 @@ export class SkillTree {
   get returnLevel(): number { return this.mode === 'double' ? this.returns : 0; }
   get returnMultiplier(): number { return 1 + this.returnLevel * 0.05; }
   get returnCost(): number { return 50 * 2 ** this.returnLevel; }
-  improvePayouts(payouts: number[]): number[] {
-    return payouts.map(value => value * this.returnMultiplier);
+  get hasPity(): boolean { return this.mode === 'double' && this.pity; }
+  readonly pityCost = 50;
+  pityActive(balanceBeforeDrop: number): boolean {
+    return this.hasPity && balanceBeforeDrop < 100;
+  }
+  improvePayouts(payouts: number[], balanceBeforeDrop = Infinity): number[] {
+    const pityMultiplier = this.pityActive(balanceBeforeDrop) ? 1.05 : 1;
+    return payouts.map(value => value * this.returnMultiplier * pityMultiplier);
+  }
+  canBuyPity(run: GameRun): boolean {
+    return this.mode === 'double' && run.mode === this.mode && !this.hasPity && run.canSpend(this.pityCost);
+  }
+  buyPity(run: GameRun): boolean {
+    if (!this.canBuyPity(run)) return false;
+    this.save(this.owned, this.returns, true);
+    run.spend(this.pityCost);
+    this.pity = true;
+    return true;
   }
   canBuyReturn(run: GameRun): boolean {
     return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.returnCost);
@@ -47,8 +66,8 @@ export class SkillTree {
     this.returns++;
     return true;
   }
-  private save(bouncyPegs: string[], returnLevel: number): void {
-    this.storage.setItem(this.key, JSON.stringify({ version: 1, bouncyPegs, returnLevel }));
+  private save(bouncyPegs: string[], returnLevel: number, pity = this.pity): void {
+    this.storage.setItem(this.key, JSON.stringify({ version: 1, bouncyPegs, returnLevel, pity }));
   }
   available(rows: number): string[] {
     const owned = new Set(this.bouncyPegs);

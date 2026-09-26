@@ -117,6 +117,7 @@
           <div class="skill-nodes">
             <button id="selectBouncy" class="skill-node" aria-pressed="true"><span class="peg-symbol" aria-hidden="true">↟</span><strong>Bouncy Peg</strong><span id="nodeLevel">Level 0</span></button>
             <button id="selectReturn" class="skill-node return-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">+%</span><strong>Bucket Return</strong><span id="returnNodeLevel">Level 0</span></button>
+            <button id="selectPity" class="skill-node pity-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">♥</span><strong>Pity</strong><span id="pityNodeState">Not owned</span></button>
           </div>
           <span class="permanent-tag">Permanent upgrade</span>
         </div>
@@ -142,6 +143,18 @@
             <p class="mode-note">Permanent across runs. Cost doubles each time.</p>
             <button id="buyReturn" class="buy-skill">Upgrade · $50</button>
             <p id="returnStatus" class="mode-note" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+        <section id="pityDetail" class="skill-detail" aria-labelledby="pityTitle" hidden>
+          <p class="eyebrow">Comeback upgrade</p>
+          <h3 id="pityTitle">Pity</h3>
+          <p>Increase every bucket's return by <strong>5% when your balance is below $100 before the drop</strong>. Stacks with Bucket Return and Luck.</p>
+          <div class="skill-stats"><div><span>Bonus status</span><strong id="pityActive">Not owned</strong></div><div><span>Your balance</span><strong id="pityBalance">$100</strong></div></div>
+          <p class="mode-note">Exactly $100 does not qualify. Going all-in keeps the bonus status from before the drop.</p>
+          <div class="skill-buy-area">
+            <p class="mode-note">One-time unlock. Kept permanently after losing.</p>
+            <button id="buyPity" class="buy-skill">Unlock · $50</button>
+            <p id="pityStatus" class="mode-note" role="status" aria-live="polite"></p>
           </div>
         </section>
       </div>

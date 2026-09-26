@@ -60,6 +60,13 @@ const el = {
   returnNext: $('returnNext'),
   returnStatus: $('returnStatus'),
   buyReturn: $<HTMLButtonElement>('buyReturn'),
+  selectPity: $<HTMLButtonElement>('selectPity'),
+  pityDetail: $('pityDetail'),
+  pityNodeState: $('pityNodeState'),
+  pityActive: $('pityActive'),
+  pityBalance: $('pityBalance'),
+  pityStatus: $('pityStatus'),
+  buyPity: $<HTMLButtonElement>('buyPity'),
   skillCount: $('skillCount'),
   nodeLevel: $('nodeLevel'),
   pegCount: $('pegCount'),
@@ -130,12 +137,17 @@ function applyLayout(): void {
 /** Luck adjusts every reference multiplier by the same percentage. */
 function applyLuck(): void {
   const payouts = payoutTable(risk, rows, luck);
-  board.setMults(skills?.improvePayouts(payouts) ?? payouts);
+    // Double or Nothing has one all-in wager: include it so the temporary $0
+    // balance cannot activate Pity on a drop that started at $100 or more.
+    board.setMults(skills?.improvePayouts(payouts, run.balance + run.inPlay) ?? payouts);
   el.luckValue.textContent = (luck > 0 ? '+' : luck < 0 ? '−' : '') + Math.abs(luck) + '%';
   el.luckNote.textContent = luck === 0
     ? 'Original reference payouts.'
       : `Every base payout × ${(1 + luck / 100).toFixed(2)}. A 2× bucket pays ${fmtMult(2 * (1 + luck / 100))}.`;
   if (skills?.returnLevel) el.luckNote.textContent += ` Bucket Return adds another +${skills.returnLevel * 5}% (×${skills.returnMultiplier.toFixed(2)}) to these payouts.`;
+  if (skills?.hasPity) el.luckNote.textContent += skills.pityActive(run.balance + run.inPlay)
+    ? ' Pity active: another +5% (×1.05).'
+    : ' Pity inactive: activates below $100 before a drop.';
 }
 
 // ---- physics tuning ----
@@ -273,6 +285,7 @@ function renderTierButtons(): void {
 }
 
 function render(): void {
+  applyLuck();
   const { balance, peak, busted } = run;
   const allInMode = mode === 'double';
   renderTierButtons();
@@ -296,7 +309,7 @@ function renderSkills(): void {
   const level = skills?.level ?? 0;
   const available = skills?.available(rows).length ?? 0;
   const active = pegIds(rows).length - available;
-  el.skillCount.textContent = `${level + (skills?.returnLevel ?? 0)} owned`;
+  el.skillCount.textContent = `${level + (skills?.returnLevel ?? 0) + Number(skills?.hasPity ?? false)} owned`;
   el.nodeLevel.textContent = `Level ${level}`;
   el.pegCount.textContent = String(level);
   el.skillBalance.textContent = fmtMoney(run.balance);
@@ -321,6 +334,18 @@ function renderSkills(): void {
     : run.busted ? 'Start a new run to earn more money.'
     : run.balance < returnCost ? `Need ${fmtMoney(returnCost - run.balance)} more.`
     : run.balance - returnCost < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : 'Paid from your current balance.');
+  const pityOwned = skills?.hasPity ?? false;
+  const pityActive = skills?.pityActive(run.balance + run.inPlay) ?? false;
+  el.pityNodeState.textContent = pityOwned ? 'Owned' : 'Not owned';
+  el.pityActive.textContent = pityOwned ? (pityActive ? '+5% active' : 'Inactive') : 'Not owned';
+  el.pityBalance.textContent = fmtMoney(run.balance);
+  el.buyPity.disabled = !skills?.canBuyPity(run);
+  el.buyPity.textContent = pityOwned ? 'Unlocked permanently' : `Unlock · ${fmtMoney(skills?.pityCost ?? 50)}`;
+  el.pityStatus.textContent = skillMessage || (pityOwned ? 'Activates automatically on qualifying drops.'
+    : run.active ? 'Wait for your ball to land.'
+    : run.busted ? 'Start a new run to earn more money.'
+    : run.balance < 50 ? `Need ${fmtMoney(50 - run.balance)} more.`
+    : run.balance - 50 < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : 'Paid from your current balance.');
 }
 
 // ---- wiring ----
@@ -346,16 +371,31 @@ el.openSkills.addEventListener('click', () => {
   el.skills.showModal();
 });
 el.closeSkills.addEventListener('click', () => el.skills.close());
-function selectSkill(bucketReturn: boolean): void {
-  el.bouncyDetail.hidden = bucketReturn;
-  el.returnDetail.hidden = !bucketReturn;
-  el.selectBouncy.setAttribute('aria-pressed', String(!bucketReturn));
-  el.selectReturn.setAttribute('aria-pressed', String(bucketReturn));
+function selectSkill(selected: 'bouncy' | 'return' | 'pity'): void {
+  el.bouncyDetail.hidden = selected !== 'bouncy';
+  el.returnDetail.hidden = selected !== 'return';
+  el.pityDetail.hidden = selected !== 'pity';
+  el.selectBouncy.setAttribute('aria-pressed', String(selected === 'bouncy'));
+  el.selectReturn.setAttribute('aria-pressed', String(selected === 'return'));
+  el.selectPity.setAttribute('aria-pressed', String(selected === 'pity'));
   if (skills) skillMessage = '';
   renderSkills();
 }
-el.selectBouncy.addEventListener('click', () => selectSkill(false));
-el.selectReturn.addEventListener('click', () => selectSkill(true));
+el.selectBouncy.addEventListener('click', () => selectSkill('bouncy'));
+el.selectReturn.addEventListener('click', () => selectSkill('return'));
+el.selectPity.addEventListener('click', () => selectSkill('pity'));
+el.buyPity.addEventListener('click', () => {
+  try {
+    if (!skills?.buyPity(run)) return;
+    sfx.unlock();
+    sfx.buy();
+    skillMessage = 'Pity unlocked. Permanently saved.';
+    if (run.busted) { el.skills.close(); bust(); }
+  } catch {
+    skillMessage = 'Could not save the upgrade. No money was spent. Please try again.';
+  }
+  render();
+});
 el.buyReturn.addEventListener('click', () => {
   try {
     if (!skills?.buyReturn(run)) return;
