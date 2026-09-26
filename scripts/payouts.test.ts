@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { MAX_ROWS, MIN_ROWS, RISKS } from '../src/config';
 import { fmtMult } from '../src/format';
 import { payoutTable } from '../src/payouts';
+import { binomialWeight } from '../src/skills';
 
 test('zero luck uses the original reference table without fitting or stretching', () => {
   assert.deepEqual(payoutTable('medium', 16, 0), [110, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3, 0.5, 1, 1.5, 3, 5, 10, 41, 110]);
@@ -10,20 +11,20 @@ test('zero luck uses the original reference table without fitting or stretching'
   assert.deepEqual(payoutTable('extreme', 16, 0), [1000, 130, 26, 9, 4, 2, .2, .2, .2, .2, .2, 2, 4, 9, 26, 130, 1000]);
 });
 
-test('High has tidy intermediate payouts, a 0.2 center and no break-even buckets', () => {
+test('High copies Medium with the agreed 16-row center and side-bucket tradeoff', () => {
   for (let rows = MIN_ROWS; rows <= MAX_ROWS; rows++) {
     const medium = payoutTable('medium', rows, 0);
-    const extreme = payoutTable('extreme', rows, 0);
     const high = payoutTable('high', rows, 0);
-    assert.ok(!high.includes(1));
-    assert.equal(high[Math.floor(rows / 2)], .2);
-    assert.equal(high[Math.ceil(rows / 2)], .2);
-    high.forEach((value, i) => {
-      assert.ok(Math.abs(value * 10 - Math.round(value * 10)) < 1e-10, 'at most one decimal place');
-      assert.ok(value >= Math.min(medium[i], extreme[i]) && value <= Math.max(medium[i], extreme[i]));
-      if (i > 0 && i <= rows / 2) assert.ok(value <= high[i - 1]);
-    });
+    const expected = [...medium];
+    if (rows === 16) {
+      expected[8] = .1;
+      expected[6] = expected[10] = 1.2;
+    }
+    assert.deepEqual(high, expected);
   }
+  const base = payoutTable('high', 16, 0);
+  const expectedReturn = base.reduce((sum, value, k) => sum + value * binomialWeight(16, k), 0);
+  assert.ok(Math.abs(expectedReturn - .9994842529296875) < 1e-12);
 });
 
 test('luck scales every bucket by the stated percentage for every layout and risk', () => {

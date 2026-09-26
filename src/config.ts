@@ -8,7 +8,7 @@ export const RISK_VERSION = 2;
 
 /**
  * Stake's multipliers for a classic 3-pin-top board, edge to centre, mirrored to build a row.
- * High sits between Medium and Extreme, with tidy payouts and a 0.2× center.
+ * High copies Medium; its 16-row board trades a 0.1× center for two 1.2× buckets.
  * These are the base payouts at 0% luck. Luck applies a straight percentage adjustment.
  */
 export const STAKE_SHAPES: Record<Risk, Record<number, number[]>> = {
@@ -35,15 +35,15 @@ export const STAKE_SHAPES: Record<Risk, Record<number, number[]>> = {
     16: [110, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3],
   },
   high: {
-    8: [20, 3.5, 1.4, 0.5, 0.2],
-    9: [30, 5.5, 1.9, 0.8, 0.2],
-    10: [50, 7.5, 2.5, 1.2, 0.5, 0.2],
-    11: [70, 10, 4, 1.6, 0.6, 0.2],
-    12: [100, 17.5, 6, 2, 0.9, 0.4, 0.2],
-    13: [150, 25, 8.5, 3.5, 1.2, 0.5, 0.2],
-    14: [240, 35, 12.5, 4.5, 1.9, 0.7, 0.4, 0.2],
-    15: [350, 50, 19, 6.5, 3, 0.9, 0.4, 0.2],
-    16: [550, 85, 18, 7, 3.5, 1.8, 0.6, 0.4, 0.2],
+    8: [13, 3, 1.3, 0.7, 0.4],
+    9: [18, 4, 1.7, 0.9, 0.5],
+    10: [22, 5, 2, 1.4, 0.6, 0.4],
+    11: [24, 6, 3, 1.8, 0.7, 0.5],
+    12: [33, 11, 4, 2, 1.1, 0.6, 0.3],
+    13: [43, 13, 6, 3, 1.3, 0.7, 0.4],
+    14: [58, 15, 7, 4, 1.9, 1, 0.5, 0.2],
+    15: [88, 18, 11, 5, 3, 1.3, 0.5, 0.3],
+    16: [110, 41, 10, 5, 3, 1.5, 1.2, 0.5, 0.1],
   },
   extreme: {
     8: [29, 4, 1.5, 0.3, 0.2],
