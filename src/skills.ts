@@ -89,37 +89,44 @@ export class SkillTree {
 
 /** A life owns its assignments and consumed charges, independent of board redraws. */
 export class LifeSkills {
-  private assigned: Record<ChargeKind, Set<string>> = { bouncy: new Set(), split: new Set(), bucket: new Set() };
-  private charged: Record<ChargeKind, Set<string>> = { bouncy: new Set(), split: new Set(), bucket: new Set() };
+  private assigned: Record<ChargeKind, Map<string, number>> = { bouncy: new Map(), split: new Map(), bucket: new Map() };
+  private charged: Record<ChargeKind, Map<string, number>> = { bouncy: new Map(), split: new Map(), bucket: new Map() };
 
   constructor(readonly rows: number, skills: SkillTree | null, private random = Math.random) { this.sync(skills); }
   /** Newly purchased unlocks add one charge; previously consumed charges stay spent. */
   sync(skills: SkillTree | null): void {
     for (const kind of CHARGES) {
       const all = targets(kind, this.rows);
-      const choices = all.filter(id => !this.assigned[kind].has(id));
       const count = Math.min(skills?.level(kind) ?? 0, all.length);
-      while (this.assigned[kind].size < count && choices.length) {
+      const assignedCount = () => [...this.assigned[kind].values()].reduce((sum, value) => sum + value, 0);
+      while (assignedCount() < count) {
         let id: string;
         if (kind === 'bucket') {
+          const choices = all.filter(choice => !this.assigned.bucket.has(choice));
           const index = Math.min(choices.length - 1, Math.max(0, Math.floor(this.random() * choices.length)));
           id = choices[index];
         } else {
           id = weightedPeg(all, this.rows, this.random);
           if (this.assigned.bouncy.has(id) || this.assigned.split.has(id)) {
-            // One reroll, excluding this type's existing assignments (including spent ones).
-            // The other type may still share the result, preserving stacked effects.
-            id = weightedPeg(choices, this.rows, this.random);
+            // Reroll exactly once. If that peg is occupied too, all upgrades stack there.
+            id = weightedPeg(all, this.rows, this.random);
           }
         }
-        choices.splice(choices.indexOf(id), 1);
-        this.assigned[kind].add(id);
-        this.charged[kind].add(id);
+        this.assigned[kind].set(id, (this.assigned[kind].get(id) ?? 0) + 1);
+        this.charged[kind].set(id, (this.charged[kind].get(id) ?? 0) + 1);
       }
     }
   }
-  remaining(kind: ChargeKind): readonly string[] { return [...this.charged[kind]]; }
-  consume(kind: ChargeKind, id: string): boolean { return this.charged[kind].delete(id); }
+  remaining(kind: ChargeKind): readonly string[] {
+    return [...this.charged[kind]].flatMap(([id, count]) => Array<string>(count).fill(id));
+  }
+  consume(kind: ChargeKind, id: string): boolean {
+    const count = this.charged[kind].get(id) ?? 0;
+    if (count <= 0) return false;
+    if (count === 1) this.charged[kind].delete(id);
+    else this.charged[kind].set(id, count - 1);
+    return true;
+  }
   payouts(base: number[]): number[] {
     return base.map((value, k) => this.charged.bucket.has(String(k)) ? luckyBucketReturn(value) : value);
   }

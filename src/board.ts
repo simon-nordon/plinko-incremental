@@ -53,8 +53,8 @@ const BALL = 0x2;
 interface Peg {
   body: Matter.Body;
   id: string;
-  bouncy: boolean;
-  split: boolean;
+  bouncy: number;
+  split: number;
   row: number;
   flash: number;
 }
@@ -195,7 +195,7 @@ export class Board {
           isStatic: true,
           collisionFilter: { category: PIN, mask: BALL },
         });
-        const peg = { body, id: `${r}:${j}`, bouncy: false, split: false, row: r, flash: 0 };
+        const peg = { body, id: `${r}:${j}`, bouncy: 0, split: 0, row: r, flash: 0 };
         this.pegs.push(peg);
         this.pegById.set(body.id, peg);
         if (r === rows - 1) this.lastRowX.push(x);
@@ -227,11 +227,12 @@ export class Board {
   }
 
   setPegCharges(bouncyIds: readonly string[], splitIds: readonly string[]): void {
-    const bouncy = new Set(bouncyIds);
-    const split = new Set(splitIds);
+    const counts = (ids: readonly string[]) => ids.reduce((map, id) => map.set(id, (map.get(id) ?? 0) + 1), new Map<string, number>());
+    const bouncy = counts(bouncyIds);
+    const split = counts(splitIds);
     for (const peg of this.pegs) {
-      peg.bouncy = bouncy.has(peg.id);
-      peg.split = split.has(peg.id);
+      peg.bouncy = bouncy.get(peg.id) ?? 0;
+      peg.split = split.get(peg.id) ?? 0;
     }
   }
 
@@ -324,9 +325,9 @@ export class Board {
       // A stacked peg spends both charges on this impact.
       const bouncy = peg.bouncy;
       const split = peg.split;
-      peg.bouncy = peg.split = false;
-      if (bouncy) this.hooks.onChargeUsed?.('bouncy', peg.id);
-      if (split) this.hooks.onChargeUsed?.('split', peg.id);
+      peg.bouncy = peg.split = 0;
+      for (let i = 0; i < bouncy; i++) this.hooks.onChargeUsed?.('bouncy', peg.id);
+      for (let i = 0; i < split; i++) this.hooks.onChargeUsed?.('split', peg.id);
       const dx = ball.body.position.x - peg.body.position.x;
       const dy = ball.body.position.y - peg.body.position.y;
       const d = Math.hypot(dx, dy) || 1;
@@ -336,29 +337,31 @@ export class Board {
       const tx = -dy / d, ty = dx / d;
       const tangentSpeed = v.x * tx + v.y * ty;
       const direction = Math.abs(tangentSpeed) > 1e-8 ? Math.sign(tangentSpeed) : (dx < 0 ? -1 : 1);
-      const launch = bouncy ? BOUNCY_PEG_KICK * direction : 0;
+      const launch = BOUNCY_PEG_KICK * bouncy * direction;
       Matter.Body.setVelocity(ball.body, {
         x: v.x + (dx / d) * ball.bumperKick + tx * launch,
         y: v.y + (dy / d) * ball.bumperKick + ty * launch,
       });
-      if (split) {
-        // Each peg can split only once per life, naturally bounding the body count.
-        // Only the original paid cost is shared; both balls keep the full wager value.
-        ball.costShare /= 2;
-        this.hooks.onDuplicate?.(ball.wagerId);
+      if (split > 0) {
+        // Every stacked charge adds one full-value copy, keeping growth linear.
+        // Only the original paid cost is shared; every ball keeps the full wager value.
+        ball.costShare /= split + 1;
         const position = { ...ball.body.position };
         const velocity = { ...ball.body.velocity };
-        const body = Matter.Bodies.circle(position.x, position.y, ball.r, {
-          restitution: ball.body.restitution, friction: ball.body.friction,
-          frictionAir: ball.body.frictionAir, slop: ball.body.slop,
-          collisionFilter: { category: BALL, mask: PIN },
-        });
-        const child: Ball = { ...ball, body, previous: position, trail: [] };
-        Matter.Body.setVelocity(ball.body, { x: velocity.x - .8, y: velocity.y });
-        Matter.Body.setVelocity(body, { x: velocity.x + .8, y: velocity.y });
-        Matter.Composite.add(this.engine.world, body);
-        this.balls.push(child);
-        this.ballById.set(body.id, child);
+        Matter.Body.setVelocity(ball.body, { x: velocity.x - .4 * split, y: velocity.y });
+        for (let i = 0; i < split; i++) {
+          this.hooks.onDuplicate?.(ball.wagerId);
+          const body = Matter.Bodies.circle(position.x, position.y, ball.r, {
+            restitution: ball.body.restitution, friction: ball.body.friction,
+            frictionAir: ball.body.frictionAir, slop: ball.body.slop,
+            collisionFilter: { category: BALL, mask: PIN },
+          });
+          const child: Ball = { ...ball, body, previous: position, trail: [] };
+          Matter.Body.setVelocity(body, { x: velocity.x + .8 * (i + 1) - .4 * split, y: velocity.y });
+          Matter.Composite.add(this.engine.world, body);
+          this.balls.push(child);
+          this.ballById.set(body.id, child);
+        }
       }
     }
     this.pinContacts.length = 0;

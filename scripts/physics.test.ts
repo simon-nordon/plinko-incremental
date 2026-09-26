@@ -11,7 +11,7 @@ const canvas = { getContext: () => ({}) } as unknown as HTMLCanvasElement;
 // Inspect physical state without adding a test-only interface to the game.
 const state = (board: Board) => board as unknown as {
   engine: Matter.Engine;
-  pegs: { id: string; bouncy: boolean; split: boolean }[];
+  pegs: { id: string; bouncy: number; split: number }[];
   balls: { body: Matter.Body; r: number; costShare: number }[];
 };
 
@@ -32,7 +32,7 @@ test('a split peg creates two full-value bodies, then stays ordinary', () => see
   for (let i = 0; i < 120 && board.active < 2; i++) board.update(STEP);
   assert.equal(board.active, 2);
   assert.deepEqual(state(board).balls.map(b => b.costShare), [.5, .5]);
-  assert.equal(state(board).pegs.find(p => p.id === '0:1')!.split, false);
+  assert.equal(state(board).pegs.find(p => p.id === '0:1')!.split, 0);
   for (let i = 0; i < 120 * 31 && board.active; i++) board.update(STEP);
   assert.deepEqual(shares, [.5, .5]);
   assert.equal(run.balance, 200);
@@ -89,6 +89,28 @@ test('a spent stacked peg has no effect on a later ball in the same life', () =>
     assert.equal(maxBodies, drop === 0 ? 2 : 1);
   }
   assert.deepEqual(used, ['bouncy', 'split']);
+}));
+
+test('same-type charges stack and every split charge adds one full-value ball', () => seeded(() => {
+  const run = new GameRun('double', 100);
+  const used: string[] = [];
+  const board = new Board(canvas, {
+    onPegHit() {},
+    onDuplicate(id) { run.duplicate(id); },
+    onChargeUsed(kind) { used.push(kind); },
+    onLand(_k, _tier, id, share) { run.settle(id, 1, share); },
+  });
+  board.setLayout(16, []);
+  board.setPegCharges([], ['0:1', '0:1']);
+  const wager = run.drop(0)!;
+  board.drop(0, wager.id);
+  board.update(STEP);
+  Matter.Body.setPosition(state(board).balls[0].body, { x: 380.5, y: 0 });
+  Matter.Body.setVelocity(state(board).balls[0].body, { x: 0, y: 0 });
+  for (let i = 0; i < 120 && board.active < 3; i++) board.update(STEP);
+  assert.equal(board.active, 3);
+  assert.deepEqual(used, ['split', 'split']);
+  assert.deepEqual(state(board).balls.map(ball => ball.costShare), [1 / 3, 1 / 3, 1 / 3]);
 }));
 
 function seeded<T>(fn: () => T): T {

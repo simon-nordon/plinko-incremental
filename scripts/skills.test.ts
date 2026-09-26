@@ -75,14 +75,13 @@ test('permanent counts survive death and fresh lives randomize positions with ov
   const run = earned();
   for (const kind of CHARGES) for (let i = 0; i < 3; i++) tree.buy(run, 8, kind);
   const life = new LifeSkills(8, tree, () => 0);
-  assert.deepEqual(life.remaining('bouncy'), ['0:1', '1:1', '1:2']);
+  assert.deepEqual(life.remaining('bouncy'), ['0:1', '0:1', '0:1']);
   assert.deepEqual(life.remaining('split'), life.remaining('bouncy'));
   for (const kind of CHARGES) {
-    assert.equal(new Set(life.remaining(kind)).size, 3);
-    for (const id of life.remaining(kind)) {
-      assert.equal(life.consume(kind, id), true);
-      assert.equal(life.consume(kind, id), false);
-    }
+    const charges = life.remaining(kind);
+    assert.equal(charges.length, 3);
+    for (const id of charges) assert.equal(life.consume(kind, id), true);
+    assert.equal(life.consume(kind, charges[0]), false);
   }
   run.settle(run.drop(0)!.id, 0);
   assert.equal(run.busted, true);
@@ -116,7 +115,7 @@ test('syncing, switching risk and purchasing other skills never refill consumed 
   tree.buy(run, 8, 'bouncy');
   tree.buy(run, 8, 'bucket');
   life.sync(tree);
-  assert.deepEqual(life.remaining('bouncy'), ['1:1']);
+  assert.deepEqual(life.remaining('bouncy'), ['0:1']);
   assert.deepEqual(life.remaining('bucket'), ['1']);
 });
 
@@ -191,21 +190,23 @@ test('version 3 saves retain starting amounts after inserting the $20 upgrade', 
   }
 });
 
-test('occupied pegs reroll once, preserve stacking and never reroll spent charges on sync', () => {
+test('occupied pegs reroll exactly once, then stack while preserving every charge', () => {
   const tree = new SkillTree('double', memoryStorage());
   const run = earned();
   tree.buy(run, 8, 'bouncy');
   tree.buy(run, 8, 'bouncy');
   tree.buy(run, 8, 'split');
+  const values = [0, 0, .999, 0, 0, 0, 0];
   let rolls = 0;
-  const life = new LifeSkills(8, tree, () => { rolls++; return 0; });
+  const life = new LifeSkills(8, tree, () => values[rolls++] ?? 0);
   assert.equal(rolls, 5, 'first placement rolls once, each occupied roll gets exactly one retry');
-  assert.deepEqual(life.remaining('bouncy'), ['0:1', '1:1']);
+  assert.equal(life.remaining('bouncy').length, 2);
+  assert.equal(new Set(life.remaining('bouncy')).size, 2, 'first reroll found an empty peg');
   assert.deepEqual(life.remaining('split'), ['0:1']);
-  life.consume('bouncy', '0:1');
+  tree.buy(run, 8, 'split');
   life.sync(tree);
-  assert.equal(rolls, 5);
-  assert.deepEqual(life.remaining('bouncy'), ['1:1']);
+  assert.equal(rolls, 7, 'the occupied reroll result is accepted without a third roll');
+  assert.deepEqual(life.remaining('split'), ['0:1', '0:1']);
 });
 
 test('spawn weights favor the triangle center while keeping all interior pegs possible', () => {
