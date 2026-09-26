@@ -2,11 +2,13 @@ export const START_MONEY = 5;
 export const MIN_ROWS = 8;
 export const MAX_ROWS = 16;
 
-export type Risk = 'low' | 'medium' | 'high';
-export const RISKS: Risk[] = ['low', 'medium', 'high'];
+export type Risk = 'low' | 'medium' | 'high' | 'extreme';
+export const RISKS: Risk[] = ['low', 'medium', 'high', 'extreme'];
+export const RISK_VERSION = 2;
 
 /**
  * Stake's multipliers for a classic 3-pin-top board, edge to centre, mirrored to build a row.
+ * High is the midpoint of Medium and the original High (now Extreme).
  * These are the base payouts at 0% luck. Luck applies a straight percentage adjustment.
  */
 export const STAKE_SHAPES: Record<Risk, Record<number, number[]>> = {
@@ -33,6 +35,17 @@ export const STAKE_SHAPES: Record<Risk, Record<number, number[]>> = {
     16: [110, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3],
   },
   high: {
+    8: [21, 3.5, 1.4, 0.5, 0.3],
+    9: [30.5, 5.5, 1.85, 0.75, 0.35],
+    10: [49, 7.5, 2.5, 1.15, 0.45, 0.3],
+    11: [72, 10, 4.1, 1.6, 0.55, 0.35],
+    12: [101.5, 17.5, 6.05, 2, 0.9, 0.4, 0.25],
+    13: [151.5, 25, 8.5, 3.5, 1.15, 0.45, 0.3],
+    14: [239, 35.5, 12.5, 4.5, 1.9, 0.65, 0.35, 0.2],
+    15: [354, 50.5, 19, 6.5, 3, 0.9, 0.35, 0.25],
+    16: [555, 85.5, 18, 7, 3.5, 1.75, 0.6, 0.35, 0.25],
+  },
+  extreme: {
     8: [29, 4, 1.5, 0.3, 0.2],
     9: [43, 7, 2, 0.6, 0.2],
     10: [76, 10, 3, 0.9, 0.3, 0.2],

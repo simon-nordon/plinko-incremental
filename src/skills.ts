@@ -20,15 +20,20 @@ export const interiorPegIds = (rows: number): string[] => pegIds(rows).filter(id
   const [row, column] = id.split(':').map(Number);
   return column > 0 && column < row + 2;
 });
-/** Smooth bias toward the triangle's center, with every interior peg still eligible. */
-export function pegSpawnWeight(id: string, rows: number): number {
-  const [row, column] = id.split(':').map(Number);
-  const x = (column - (row + 2) / 2) / (rows / 4);
-  const y = (row - (rows - 1) * 2 / 3) / (rows / 3);
-  return .15 + Math.exp(-(x * x + y * y) / 2);
+/** Probability of k right turns in n independent, equally likely left/right deflections. */
+export function binomialWeight(n: number, k: number): number {
+  if (!Number.isInteger(n) || !Number.isInteger(k) || n < 0 || k < 0 || k > n) return 0;
+  let combinations = 1;
+  for (let i = 1; i <= Math.min(k, n - k); i++) combinations = combinations * (n - i + 1) / i;
+  return combinations / 2 ** n;
 }
-function weightedPeg(choices: string[], rows: number, random: () => number): string {
-  const weights = choices.map(id => pegSpawnWeight(id, rows));
+/** The top center is certain; row r follows r deflections. Each row has equal total weight. */
+export function pegSpawnWeight(id: string): number {
+  const [row, column] = id.split(':').map(Number);
+  return binomialWeight(row, column - 1);
+}
+function weightedTarget(choices: string[], weight: (id: string) => number, random: () => number): string {
+  const weights = choices.map(weight);
   let roll = Math.max(0, Math.min(1, random())) * weights.reduce((sum, weight) => sum + weight, 0);
   for (let i = 0; i < choices.length; i++) {
     roll -= weights[i];
@@ -103,13 +108,12 @@ export class LifeSkills {
         let id: string;
         if (kind === 'bucket') {
           const choices = all.filter(choice => !this.assigned.bucket.has(choice));
-          const index = Math.min(choices.length - 1, Math.max(0, Math.floor(this.random() * choices.length)));
-          id = choices[index];
+          id = weightedTarget(choices, choice => binomialWeight(this.rows, Number(choice)), this.random);
         } else {
-          id = weightedPeg(all, this.rows, this.random);
+          id = weightedTarget(all, pegSpawnWeight, this.random);
           if (this.assigned.bouncy.has(id) || this.assigned.split.has(id)) {
             // Reroll exactly once. If that peg is occupied too, all upgrades stack there.
-            id = weightedPeg(all, this.rows, this.random);
+            id = weightedTarget(all, pegSpawnWeight, this.random);
           }
         }
         this.assigned[kind].set(id, (this.assigned[kind].get(id) ?? 0) + 1);

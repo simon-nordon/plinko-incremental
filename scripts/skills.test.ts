@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { GameRun } from '../src/game';
-import { SkillTree, LifeSkills, SKILLS, CHARGES, pegIds, interiorPegIds, pegSpawnWeight, luckyBucketReturn, startingDropAt } from '../src/skills';
+import { SkillTree, LifeSkills, SKILLS, CHARGES, pegIds, interiorPegIds, pegSpawnWeight, binomialWeight, luckyBucketReturn, startingDropAt } from '../src/skills';
 import { payoutTable } from '../src/payouts';
 import { resetAllProgress } from '../src/progress';
 
@@ -102,7 +102,7 @@ test('syncing, switching risk and purchasing other skills never refill consumed 
   const life = new LifeSkills(8, tree, () => 0);
   life.consume('bouncy', '0:1');
   life.consume('bucket', '0');
-  for (const risk of ['low', 'medium', 'high'] as const) {
+  for (const risk of ['low', 'medium', 'high', 'extreme'] as const) {
     life.sync(tree);
     const base = payoutTable(risk, 8, 0);
     assert.deepEqual(life.payouts(base), base);
@@ -209,14 +209,39 @@ test('occupied pegs reroll exactly once, then stack while preserving every charg
   assert.deepEqual(life.remaining('split'), ['0:1', '0:1']);
 });
 
-test('spawn weights favor the triangle center while keeping all interior pegs possible', () => {
+test('peg weights follow a binomial path from the top center at every row', () => {
   for (let rows = 8; rows <= 16; rows++) {
-    const row = Math.round((rows - 1) * 2 / 3);
-    const center = `${row}:${Math.round((row + 2) / 2)}`;
-    assert.ok(pegSpawnWeight(center, rows) > pegSpawnWeight(`${row}:1`, rows));
-    assert.ok(pegSpawnWeight(center, rows) > pegSpawnWeight('0:1', rows));
-    assert.ok(interiorPegIds(rows).every(id => pegSpawnWeight(id, rows) > 0));
+    for (let row = 0; row < rows; row++) {
+      const weights = Array.from({ length: row + 1 }, (_, k) => pegSpawnWeight(`${row}:${k + 1}`));
+      assert.equal(weights.reduce((sum, value) => sum + value, 0), 1);
+      assert.deepEqual(weights, [...weights].reverse());
+      for (let k = 0; k <= row; k++) {
+        const probability = row === 0 ? 1 : (binomialWeight(row - 1, k - 1) + binomialWeight(row - 1, k)) / 2;
+        assert.equal(weights[k], probability);
+      }
+      assert.equal(pegSpawnWeight(`${row}:0`), 0);
+      assert.equal(pegSpawnWeight(`${row}:${row + 2}`), 0);
+    }
   }
+});
+
+test('actual peg and Golden Bucket placement samples the binomial distribution', () => {
+  const tree = new SkillTree('double', memoryStorage());
+  const run = earned();
+  tree.buy(run, 8, 'bouncy');
+  tree.buy(run, 8, 'bucket');
+  const pegs = new Map<string, number>();
+  const buckets = Array<number>(9).fill(0);
+  // Evenly spaced rolls cover the CDF exactly, without flaky random sampling.
+  for (let i = 0; i < 1024; i++) {
+    const life = new LifeSkills(8, tree, () => (i + .5) / 1024);
+    const id = life.remaining('bouncy')[0];
+    pegs.set(id, (pegs.get(id) ?? 0) + 1);
+    buckets[Number(life.remaining('bucket')[0])]++;
+  }
+  assert.deepEqual(buckets, [1, 8, 28, 56, 70, 56, 28, 8, 1].map(value => value * 4));
+  assert.equal(pegs.get('0:1'), 128);
+  assert.deepEqual(Array.from({ length: 8 }, (_, k) => pegs.get(`7:${k + 1}`)), [1, 7, 21, 35, 35, 21, 7, 1]);
 });
 
 test('special pegs never occupy either outer edge on any layout', () => {

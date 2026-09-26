@@ -9,6 +9,7 @@ import {
   MIN_ROWS,
   PHYSICS_RANGES,
   PHYSICS_VERSION,
+  RISK_VERSION,
   bucketColor,
   type PhysicsSettings,
   type Risk,
@@ -74,14 +75,15 @@ function loadPrefs(forMode?: GameMode): { mode: GameMode; risk: Risk; rows: numb
     const shared = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}');
     const selected: GameMode = forMode ?? (shared.mode === 'double' ? 'double' : 'classic');
     const saved = JSON.parse(localStorage.getItem(`${PREFS_KEY}-${selected}`) ?? (forMode ? '{}' : JSON.stringify(shared)));
-    return { ...def, ...saved, mode: selected, muted: shared.muted ?? false, physics: saved.physicsVersion === PHYSICS_VERSION ? saved.physics : def.physics };
+    const savedRisk = saved.risk === 'high' && saved.riskVersion !== RISK_VERSION ? 'extreme' : saved.risk;
+    return { ...def, ...saved, risk: savedRisk ?? def.risk, mode: selected, muted: shared.muted ?? false, physics: saved.physicsVersion === PHYSICS_VERSION ? saved.physics : def.physics };
   } catch {
     return def;
   }
 }
 function savePrefs(): void {
   try {
-    const prefs = JSON.stringify({ mode, risk, rows, muted: sfx.muted, luck, physics, physicsVersion: PHYSICS_VERSION });
+    const prefs = JSON.stringify({ mode, risk, riskVersion: RISK_VERSION, rows, muted: sfx.muted, luck, physics, physicsVersion: PHYSICS_VERSION });
     localStorage.setItem(`${PREFS_KEY}-${mode}`, prefs);
     localStorage.setItem(PREFS_KEY, prefs);
   } catch {
