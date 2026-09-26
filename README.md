@@ -4,8 +4,10 @@
 
 A browser-based Plinko game built with TypeScript, Vite, and Matter.js.
 
+Fresh settings default to Double or Nothing with High risk and red balls. Saved mode and risk choices are preserved. The bottom-right **Dev mode** toggle reveals Risk, Rows, and the tuning panel, including Ball Size, Weight, Bounciness, and progress reset. It starts disabled on every page load.
+
 - **Normal:** start with $5, drop balls from $1, and unlock larger stakes as your balance grows.
-- **Double or Nothing:** the first $10 ball each life is on the house. Your spendable balance starts at $0; only the proceeds can buy upgrades. Subsequent drops wager your entire balance. Wait for all split children to land before dropping or buying again. Below 10% of that life's starting money ends the life after all balls settle ($1 initially, $15 with a $150 start).
+- **Double or Nothing:** the first $10 ball each life is on the house. Your spendable balance starts at $0; only the proceeds can buy upgrades. Subsequent drops wager your entire balance. Wait for all split children to land before dropping or buying again. The loss threshold is 10% of the greater of your starting stake and highest balance this life: $1 initially, rising to $200 after reaching $2,000. It never falls until a new life. Falling below it ends the life after all balls settle; exactly the threshold is playable. The threshold appears beneath your balance. Upgrade purchases are blocked if they would leave less than this amount.
 - **Bouncy Peg:** adds one randomly placed purple peg per life. Any first contact, including a graze, gives a fixed tangential kick aligned with the ball's travel (bounded by the simulation speed limit), then it becomes ordinary.
 - **Split Peg:** adds one randomly placed blue peg per life. Its first hit creates two full-value balls, then it becomes ordinary. Bouncy and Split can occupy the same peg and both activate on that hit.
 - **Golden Bucket:** adds one randomly placed gold bucket per life. The first ball pays twice the base multiplier (0.3× → 0.6×, 110× → 220×), then the bucket returns to its base payout. Only one split child can consume its charge.

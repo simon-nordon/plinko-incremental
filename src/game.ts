@@ -21,12 +21,13 @@ export class GameRun {
   }
   get houseDropAvailable(): boolean { return this.houseAvailable; }
   get active(): number { return this.wagers.size; }
-  get minimumBet(): number { return this.mode === 'double' ? cents(this.houseStake * .1) : 1; }
+  get minimumBet(): number { return this.mode === 'double' ? cents(Math.max(this.houseStake, this.peak) * .1) : 1; }
   get busted(): boolean { return !this.houseAvailable && this.balance < this.minimumBet && this.active === 0; }
   get inPlay(): number { return [...this.wagers.values()].reduce((sum, bet) => sum + bet.amount * bet.remaining, 0); }
 
   canSpend(amount: number): boolean {
-    return !this.houseAvailable && !this.busted && this.active === 0 && Number.isFinite(amount) && amount > 0 && amount <= this.balance;
+    return !this.houseAvailable && !this.busted && this.active === 0 && Number.isFinite(amount) && amount > 0
+      && amount <= this.balance && cents(this.balance - amount) >= this.minimumBet;
   }
   spend(amount: number): boolean {
     if (!this.canSpend(amount)) return false;

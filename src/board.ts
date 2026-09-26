@@ -91,6 +91,7 @@ export interface BoardHooks {
 }
 
 export class Board {
+  ballStyleOverride: { color: string; deep: string } | null = null;
   rows = 16;
   mults: number[] = [];
   private engine = Matter.Engine.create();
@@ -482,7 +483,7 @@ export class Board {
     this.renderBuckets(X, Y);
 
     for (const b of this.balls) {
-      const { color, deep } = ballStyle(b.tier);
+      const { color, deep } = this.ballStyleOverride ?? ballStyle(b.tier);
       for (let i = 0; i < b.trail.length - 2; i += 2) {
         const a = (i / 2 + 1) / (b.trail.length / 2);
         ctx.globalAlpha = a * 0.25;

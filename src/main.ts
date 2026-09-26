@@ -24,8 +24,12 @@ import { SkillTree, LifeSkills, SKILLS, startingDropAt, type SkillKind } from '.
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const el = {
+  devMode: $<HTMLButtonElement>('devMode'),
+  boardSettings: $('boardSettings'),
+  tuningPanel: $('tuningPanel'),
   gameMode: $<HTMLInputElement>('gameMode'),
   balance: $('balance'),
+  lossThreshold: $('lossThreshold'),
   risk: $<HTMLSelectElement>('risk'),
   rows: $<HTMLSelectElement>('rows'),
   tiers: $('tiers'),
@@ -70,10 +74,10 @@ const el = {
 // Settings are a per-browser convenience; the run itself always starts fresh.
 const PREFS_KEY = 'plinko-prefs';
 function loadPrefs(forMode?: GameMode): { mode: GameMode; risk: Risk; rows: number; muted: boolean; luck: number; physics: PhysicsSettings } {
-  const def = { mode: forMode ?? 'classic' as GameMode, risk: 'medium' as Risk, rows: 16, muted: false, luck: DEFAULT_LUCK, physics: { ...DEFAULT_PHYSICS } };
+  const def = { mode: forMode ?? 'double' as GameMode, risk: 'high' as Risk, rows: 16, muted: false, luck: DEFAULT_LUCK, physics: { ...DEFAULT_PHYSICS } };
   try {
     const shared = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}');
-    const selected: GameMode = forMode ?? (shared.mode === 'double' ? 'double' : 'classic');
+    const selected: GameMode = forMode ?? (shared.mode === 'classic' ? 'classic' : 'double');
     const saved = JSON.parse(localStorage.getItem(`${PREFS_KEY}-${selected}`) ?? (forMode ? '{}' : JSON.stringify(shared)));
     const savedRisk = saved.risk === 'high' && saved.riskVersion !== RISK_VERSION ? 'extreme' : saved.risk;
     return { ...def, ...saved, risk: savedRisk ?? def.risk, mode: selected, muted: shared.muted ?? false, physics: saved.physicsVersion === PHYSICS_VERSION ? saved.physics : def.physics };
@@ -288,6 +292,9 @@ function render(): void {
   applyLuck();
   const { balance, peak, busted } = run;
   const allInMode = mode === 'double';
+  board.ballStyleOverride = allInMode ? { color: '#ef4444', deep: '#991b1b' } : null;
+  el.lossThreshold.hidden = !allInMode;
+  el.lossThreshold.textContent = `Lose below ${fmtMoney(run.minimumBet)} · 10% of your life’s peak (minimum ${fmtMoney(run.houseStake * .1)}).`;
   renderTierButtons();
   el.balance.textContent = fmtMoney(balance);
   el.peak.textContent = fmtMoney(peak);
@@ -298,7 +305,7 @@ function render(): void {
   el.tiers.hidden = allInMode;
   el.dropStatus.hidden = allInMode || balance >= run.minimumBet || run.active === 0;
   el.allIn.hidden = el.allInRules.hidden = !allInMode;
-  el.allInRules.textContent = `First ball on the house, then wager your whole balance. Wait for every ball to land. Below ${fmtMoney(run.minimumBet)} ends this life (10% of its starting money).`;
+  el.allInRules.textContent = `First ball on the house, then wager your whole balance. Wait for every ball to land. Your loss threshold rises with your highest balance and never falls this life.`;
   el.allIn.disabled = busted || run.active > 0;
   el.allInLabel.textContent = run.houseDropAvailable ? 'Drop Ball · On the House'
     : run.active > 0 ? 'Drop in play' : 'Drop Ball · All In';
@@ -314,7 +321,7 @@ const skillInfo: Record<SkillKind, { title: string; description: string }> = {
   bouncy: { title: 'Bouncy Peg', description: 'One random interior peg gives a strong, fixed kick along the tangent at contact—even on a grazing hit—then becomes ordinary. It can also be a Split Peg. Each level adds one charge per life.' },
   split: { title: 'Split Peg', description: 'One random interior peg duplicates a ball. Both balls keep the full original value. The peg then becomes ordinary. It can also be Bouncy. Each level adds one charge per life.' },
   bucket: { title: 'Golden Bucket', description: 'One random gold bucket doubles its return: 0.3× → 0.6×, 110× → 220×. Only the first ball gets the bonus, then it returns to normal. Each level adds another golden bucket per life.' },
-  starting: { title: 'More Starting Money', description: 'Increase the house-funded first ball: $10 → $20 → $50 → $100 → $150 → $250 → $500 → $1,000… with no level cap. New lives end below 10% of their starting money. Purchases take effect next life.' },
+  starting: { title: 'More Starting Money', description: 'Increase the house-funded first ball: $10 → $20 → $50 → $100 → $150 → $250 → $500 → $1,000… with no level cap. The loss threshold starts at 10% of that amount, then rises with your highest balance. Purchases take effect next life.' },
 };
 
 function renderSkills(): void {
@@ -337,7 +344,7 @@ function renderSkills(): void {
     : `${lifeSkills.remaining(kind).length} of ${level} charges remaining this life. Fresh random positions each life; spent charges stay spent until then.`;
   el.skillPriceNote.textContent = kind === 'starting'
     ? `Next: ${fmtMoney(startingDropAt(level + 1))} per life. Costs 10× that amount.`
-    : 'Each purchase adds one charge now and every future life. Prices: $25, $50, $100…';
+    : 'Each purchase adds one charge now and every future life. Prices: $10, $20, $40…';
   el.buySkill.disabled = !skills?.canBuy(run, rows, kind);
   el.buySkill.textContent = maxed ? 'Maximum on this board' : `Upgrade · ${fmtMoney(cost)}`;
   el.skillStatus.textContent = skillMessage || (run.houseDropAvailable
@@ -346,11 +353,16 @@ function renderSkills(): void {
     : run.busted ? 'Start a new life to earn more money.'
     : maxed ? 'All available upgrades are owned.'
     : run.balance < cost ? `Need ${fmtMoney(cost - run.balance)} more.`
-    : run.balance - cost < run.minimumBet ? 'Buying this ends your life. The upgrade is kept.'
+    : run.balance - cost < run.minimumBet ? `Keep at least ${fmtMoney(run.minimumBet)} to afford your next ball.`
     : 'Paid from your earned balance.');
 }
 
 // ---- wiring ----
+el.devMode.addEventListener('click', () => {
+  const enabled = el.devMode.getAttribute('aria-pressed') !== 'true';
+  el.devMode.setAttribute('aria-pressed', String(enabled));
+  el.boardSettings.hidden = el.tuningPanel.hidden = !enabled;
+});
 
 el.gameMode.addEventListener('change', () => {
   if (run.active > 0) { render(); return; }

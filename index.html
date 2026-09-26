@@ -21,6 +21,7 @@
         <div class="field">
           <span class="label">Balance</span>
           <div id="balance" class="balance">$5.00</div>
+          <p id="lossThreshold" class="mode-note" hidden></p>
           <p id="houseNote" class="mode-note" hidden></p>
         </div>
 
@@ -30,10 +31,10 @@
           <span id="allInLabel">Drop Ball · All In</span>
           <span id="allInAmount" class="all-in-amount">$10.00</span>
         </button>
-        <p id="allInRules" class="mode-note" hidden>First ball on the house, then wager your whole balance. Below 10% of starting money ends the life.</p>
+        <p id="allInRules" class="mode-note" hidden>First ball on the house, then wager your whole balance. Below 10% of your highest balance ends the life.</p>
         <button id="openSkills" class="skills-button" hidden><span class="peg-symbol" aria-hidden="true">↟</span><span>Skill tree</span><span id="skillCount" class="skill-count">0 owned</span></button>
 
-        <div class="board-settings">
+        <div id="boardSettings" class="board-settings" hidden>
           <label class="field">
             <span class="label">Risk</span>
             <select id="risk">
@@ -62,7 +63,7 @@
         <div id="history" class="history"></div>
       </main>
 
-      <aside class="tune">
+      <aside id="tuningPanel" class="tune" hidden>
         <h3>Tuning</h3>
         <div id="luckControls">
         <label class="field">
@@ -144,6 +145,7 @@
       </div>
       <p class="skills-save-note">Progress is saved in this browser, separately from Normal mode.</p>
     </dialog>
+    <button id="devMode" class="dev-mode-toggle" type="button" aria-pressed="false" aria-controls="boardSettings tuningPanel">Dev mode</button>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

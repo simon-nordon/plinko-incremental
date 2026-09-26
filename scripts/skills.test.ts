@@ -278,13 +278,17 @@ test('purchase caps match the visible layout and excess unlocks return on a larg
   assert.equal(next.remaining('bucket').length, 10);
 });
 
-test('spending the last money ends the life while keeping the bought upgrade', () => {
+test('upgrade purchases cannot leave less than the next ball threshold', () => {
   const storage = memoryStorage();
   const tree = new SkillTree('double', storage);
   const run = earned(10);
-  assert.ok(tree.buy(run, 8, 'split'));
-  assert.equal(run.busted, true);
-  assert.equal(new SkillTree('double', storage).level('split'), 1);
+  assert.equal(tree.buy(run, 8, 'split'), false);
+  assert.equal(run.balance, 10);
+  assert.equal(run.busted, false);
+  assert.equal(new SkillTree('double', storage).level('split'), 0);
+  const enough = earned(20);
+  assert.ok(tree.buy(enough, 8, 'split'));
+  assert.ok(enough.drop(0));
 });
 
 test('old experimental skills are ignored and their original save stays untouched', () => {

@@ -96,6 +96,23 @@ test('every life loses strictly below 10% of its starting amount', () => {
   }
 });
 
+test('Double loss threshold follows the peak and survives spending', () => {
+  const game = earned(2000);
+  assert.equal(game.minimumBet, 200);
+  assert.equal(game.spend(1800.01), false);
+  assert.equal(game.balance, 2000);
+  assert.equal(game.spend(1800), true);
+  assert.equal(game.minimumBet, 200);
+  const wager = game.drop(0)!;
+  game.duplicate(wager.id);
+  game.settle(wager.id, .5, .5);
+  assert.equal(game.busted, false);
+  game.settle(wager.id, .49995, .5);
+  assert.equal(game.balance, 199.99);
+  assert.equal(game.busted, true);
+  assert.equal(new GameRun('double').minimumBet, 1);
+});
+
 test('paid losses still show the actual net loss', () => {
   const game = earned();
   const loss = game.settle(game.drop(0)!.id, .3)!;
