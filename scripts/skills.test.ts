@@ -119,7 +119,7 @@ test('syncing, switching risk and purchasing other skills never refill consumed 
   assert.deepEqual(life.remaining('bucket'), ['1']);
 });
 
-test('Golden Buckets double their multiplier once, even for full-value duplicates', () => {
+test('Golden Buckets double their multiplier once, even for split children', () => {
   assert.deepEqual([.1, .4, .7, 1, 1.2, 2, 110].map(luckyBucketReturn), [.2, .8, 1.4, 2, 2.4, 4, 220]);
   const tree = new SkillTree('double', memoryStorage());
   tree.buy(earned(), 8, 'bucket');
@@ -133,7 +133,7 @@ test('Golden Buckets double their multiplier once, even for full-value duplicate
   life.consume('bucket', '0');
   run.settle(bet.id, first, .5);
   run.settle(bet.id, life.payouts(base)[0], .5);
-  assert.equal(run.balance, 120);
+  assert.equal(run.balance, 60);
   assert.deepEqual(life.payouts(base), base);
   assert.deepEqual(new LifeSkills(8, tree, () => 0).payouts(base), [.8, .7, 1.2]);
 });

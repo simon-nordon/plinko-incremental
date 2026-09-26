@@ -15,7 +15,7 @@ const state = (board: Board) => board as unknown as {
   balls: { body: Matter.Body; r: number; costShare: number }[];
 };
 
-test('a split peg creates two full-value bodies, then stays ordinary', () => seeded(() => {
+test('a split peg creates two half-value bodies, then stays ordinary', () => seeded(() => {
   const run = new GameRun('double', 100);
   const shares: number[] = [];
   const board = new Board(canvas, { onPegHit() {}, onDuplicate(id) { run.duplicate(id); }, onLand(_k, _tier, id, share) {
@@ -35,11 +35,11 @@ test('a split peg creates two full-value bodies, then stays ordinary', () => see
   assert.equal(state(board).pegs.find(p => p.id === '0:1')!.split, 0);
   for (let i = 0; i < 120 * 31 && board.active; i++) board.update(STEP);
   assert.deepEqual(shares, [.5, .5]);
-  assert.equal(run.balance, 200);
+  assert.equal(run.balance, 100);
   assert.equal(run.active, 0);
 }));
 
-test('stacked effects each fire once per life and every full-value copy settles', () => seeded(() => {
+test('stacked effects each fire once per life and split shares conserve the wager', () => seeded(() => {
   const run = new GameRun('double', 100);
   const consumed = new Set<string>();
   let landedShare = 0;
@@ -66,7 +66,7 @@ test('stacked effects each fire once per life and every full-value copy settles'
     if (key.startsWith('bouncy')) assert.ok(consumed.has('split' + key.slice(6)));
   }
   assert.equal(landedShare, 1);
-  assert.equal(run.balance, 100 * (1 + consumed.size / 2));
+  assert.equal(run.balance, 100);
   assert.equal(run.active, 0);
   assert.ok(state(board).pegs.every(p => p.bouncy === p.split));
 }));
@@ -91,7 +91,7 @@ test('a spent stacked peg has no effect on a later ball in the same life', () =>
   assert.deepEqual(used, ['bouncy', 'split']);
 }));
 
-test('same-type charges stack and every split charge adds one full-value ball', () => seeded(() => {
+test('same-type charges stack and divide value among the resulting balls', () => seeded(() => {
   const run = new GameRun('double', 100);
   const used: string[] = [];
   const board = new Board(canvas, {
@@ -111,6 +111,7 @@ test('same-type charges stack and every split charge adds one full-value ball', 
   assert.equal(board.active, 3);
   assert.deepEqual(used, ['split', 'split']);
   assert.deepEqual(state(board).balls.map(ball => ball.costShare), [1 / 3, 1 / 3, 1 / 3]);
+  assert.equal(run.inPlay, 100);
 }));
 
 function seeded<T>(fn: () => T): T {

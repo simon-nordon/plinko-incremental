@@ -344,8 +344,7 @@ export class Board {
         y: v.y + (dy / d) * ball.bumperKick + ty * launch,
       });
       if (split > 0) {
-        // Every stacked charge adds one full-value copy, keeping growth linear.
-        // Only the original paid cost is shared; every ball keeps the full wager value.
+        // Every stacked charge adds one ball. Their shares total the original value.
         ball.costShare /= split + 1;
         const position = { ...ball.body.position };
         const velocity = { ...ball.body.velocity };

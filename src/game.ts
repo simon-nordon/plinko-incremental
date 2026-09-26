@@ -13,7 +13,7 @@ export class GameRun {
   peak: number;
   drops = 0;
   private houseAvailable: boolean;
-  private wagers = new Map<number, Wager & { remaining: number; paid: number; rawPaid: number }>();
+  private wagers = new Map<number, Wager & { remaining: number; remainingShare: number; paid: number; rawPaid: number }>();
 
   constructor(readonly mode: GameMode, readonly houseStake = 10) {
     this.balance = this.peak = startingBalance(mode);
@@ -23,7 +23,7 @@ export class GameRun {
   get active(): number { return this.wagers.size; }
   get minimumBet(): number { return this.mode === 'double' ? cents(Math.max(this.houseStake * .1, this.peak * .05)) : 1; }
   get busted(): boolean { return !this.houseAvailable && this.balance < this.minimumBet && this.active === 0; }
-  get inPlay(): number { return [...this.wagers.values()].reduce((sum, bet) => sum + bet.amount * bet.remaining, 0); }
+  get inPlay(): number { return [...this.wagers.values()].reduce((sum, bet) => sum + bet.amount * bet.remainingShare, 0); }
 
   canSpend(amount: number): boolean {
     return !this.houseAvailable && !this.busted && this.active === 0 && Number.isFinite(amount) && amount > 0
@@ -43,10 +43,10 @@ export class GameRun {
     const bet = { id: ++this.drops, tier: tierIndex, amount, cost };
     this.houseAvailable = false;
     this.balance = cents(this.balance - cost);
-    this.wagers.set(bet.id, { ...bet, remaining: 1, paid: 0, rawPaid: 0 });
+    this.wagers.set(bet.id, { ...bet, remaining: 1, remainingShare: 1, paid: 0, rawPaid: 0 });
     return bet;
   }
-  /** A duplicate adds a full-value ball without charging the player's balance. */
+  /** A split adds a ball that shares the original wager without an extra charge. */
   duplicate(id: number): boolean {
     const wager = this.wagers.get(id);
     if (!wager) return false;
@@ -57,9 +57,10 @@ export class GameRun {
     const wager = this.wagers.get(id);
     if (!wager || !(costShare > 0 && costShare <= 1) || !Number.isFinite(multiplier) || multiplier < 0) return null;
     wager.remaining--;
+    wager.remainingShare = Math.max(0, wager.remainingShare - costShare);
     const complete = wager.remaining === 0;
     if (complete) this.wagers.delete(id);
-    wager.rawPaid += wager.amount * multiplier;
+    wager.rawPaid += wager.amount * costShare * multiplier;
     const payout = cents(wager.rawPaid) - wager.paid;
     wager.paid = cents(wager.rawPaid);
     this.balance = cents(this.balance + payout);

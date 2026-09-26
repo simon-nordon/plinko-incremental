@@ -36,50 +36,51 @@ test('the first ball is house-funded at the chosen starting amount', () => {
   }
 });
 
-test('house duplicate proceeds remain unavailable until every full-value ball lands', () => {
+test('split house proceeds remain unavailable until both half-value balls land', () => {
   const game = new GameRun('double');
   const bet = game.drop(0)!;
   assert.ok(game.duplicate(bet.id));
-  assert.equal(game.inPlay, 20);
+  assert.equal(game.inPlay, 10);
   game.settle(bet.id, 2, .5);
-  assert.equal(game.balance, 20);
+  assert.equal(game.balance, 10);
+  assert.equal(game.inPlay, 5);
   assert.equal(game.spend(5), false);
   assert.equal(game.drop(0), null);
   game.settle(bet.id, 0, .5);
   assert.equal(game.spend(5), true);
-  assert.equal(game.balance, 15);
+  assert.equal(game.balance, 5);
 });
 
-test('duplicates pay full value while the original wager is charged only once', () => {
+test('split children divide the wager and their different buckets settle once', () => {
   const game = earned();
   const bet = game.drop(0)!;
   game.duplicate(bet.id);
   game.duplicate(bet.id);
-  assert.equal(game.inPlay, 300);
+  assert.equal(game.inPlay, 100);
   const first = game.settle(bet.id, .1, .5)!;
-  assert.equal(first.payout, 10);
-  assert.equal(first.profit, -40);
+  assert.equal(first.payout, 5);
+  assert.equal(first.profit, -45);
   assert.equal(first.complete, false);
   assert.equal(game.busted, false);
   assert.equal(game.drop(0), null);
-  assert.equal(game.inPlay, 200);
+  assert.equal(game.inPlay, 50);
   assert.equal(game.settle(bet.id, 100, 2), null);
   game.settle(bet.id, 2, .25);
   const last = game.settle(bet.id, 0, .25)!;
   assert.equal(last.complete, true);
-  assert.equal(last.totalProfit, 110);
-  assert.equal(game.balance, 210);
+  assert.equal(last.totalProfit, -45);
+  assert.equal(game.balance, 55);
   assert.equal(game.active, 0);
   assert.equal(game.settle(bet.id, 1000, .25), null);
   assert.equal(game.duplicate(bet.id), false);
 });
 
-test('fractional cents are accumulated across full-value copies', () => {
+test('fractional cents are accumulated across split shares', () => {
   const game = earned(10.01);
   const bet = game.drop(0)!;
   for (let i = 1; i < 128; i++) game.duplicate(bet.id);
   for (let i = 0; i < 128; i++) game.settle(bet.id, .01, 1 / 128);
-  assert.equal(game.balance, 12.81);
+  assert.equal(game.balance, 0.1);
   assert.equal(game.active, 0);
 });
 
@@ -105,9 +106,9 @@ test('Double loss threshold is 5% of peak with a 10% starting floor', () => {
   assert.equal(game.minimumBet, 100);
   const wager = game.drop(0)!;
   game.duplicate(wager.id);
-  game.settle(wager.id, .5, .5);
+  game.settle(wager.id, 1, .5);
   assert.equal(game.busted, false);
-  game.settle(wager.id, .4999, .5);
+  game.settle(wager.id, .9998, .5);
   assert.equal(game.balance, 99.99);
   assert.equal(game.busted, true);
   assert.equal(new GameRun('double').minimumBet, 1);
