@@ -18,7 +18,7 @@ function earned(balance = 1000): GameRun {
 test('developer reset clears both modes and legacy saves without touching other site data', () => {
   const keys = ['plinko-prefs', 'plinko-prefs-classic', 'plinko-prefs-double',
     'plinko-skills-classic-v3', 'plinko-skills-double-v1', 'plinko-skills-double-v2',
-    'plinko-skills-double-v3', 'unrelated-preference'];
+    'plinko-skills-double-v3', 'plinko-skills-double-v4', 'unrelated-preference'];
   const items = new Map(keys.map(key => [key, 'saved']));
   resetAllProgress({
     get length() { return items.size; },
@@ -144,7 +144,7 @@ test('starting money continues past $500 and every upgrade costs ten times its n
   const tree = new SkillTree('double', storage);
   const run = earned(1e9);
   assert.equal(tree.startingDrop, 10);
-  for (const amount of [50, 100, 150, 250, 500, 1000, 1500, 2500, 5000, 10000, 15000, 25000, 50000, 100000]) {
+  for (const amount of [20, 50, 100, 150, 250, 500, 1000, 1500, 2500, 5000, 10000, 15000, 25000, 50000, 100000]) {
     assert.equal(tree.cost('starting'), amount * 10);
     const before = run.balance;
     assert.ok(tree.buy(run, 8, 'starting'));
@@ -175,6 +175,19 @@ test('version 2 saves keep purchased starting amounts and migrate without spendi
     assert.ok(tree.buy(earned(), 8, 'bucket'));
     assert.equal(storage.getItem('plinko-skills-double-v2'), raw);
     assert.equal(new SkillTree('double', storage).startingDrop, amount);
+  }
+});
+
+test('version 3 saves retain starting amounts after inserting the $20 upgrade', () => {
+  for (const [level, amount] of [10, 50, 100, 150, 250, 500, 1000, 1500, 2500, 5000, 10000].entries()) {
+    const storage = memoryStorage();
+    const raw = JSON.stringify({ version: 3, levels: { bouncy: 2, split: 1, bucket: 0, starting: level } });
+    storage.setItem('plinko-skills-double-v3', raw);
+    const tree = new SkillTree('double', storage);
+    assert.equal(tree.startingDrop, amount);
+    assert.ok(tree.buy(earned(), 8, 'bucket'));
+    assert.equal(new SkillTree('double', storage).startingDrop, amount);
+    assert.equal(storage.getItem('plinko-skills-double-v3'), raw);
   }
 });
 

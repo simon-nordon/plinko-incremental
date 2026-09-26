@@ -312,7 +312,7 @@ const skillInfo: Record<SkillKind, { title: string; description: string }> = {
   bouncy: { title: 'Bouncy Peg', description: 'One random interior peg gives a strong, fixed kick along the tangent at contact—even on a grazing hit—then becomes ordinary. It can also be a Split Peg. Each level adds one charge per life.' },
   split: { title: 'Split Peg', description: 'One random interior peg duplicates a ball. Both balls keep the full original value. The peg then becomes ordinary. It can also be Bouncy. Each level adds one charge per life.' },
   bucket: { title: 'Golden Bucket', description: 'One random gold bucket doubles its return: 0.3× → 0.6×, 110× → 220×. Only the first ball gets the bonus, then it returns to normal. Each level adds another golden bucket per life.' },
-  starting: { title: 'More Starting Money', description: 'Increase the house-funded first ball: $10 → $50 → $100 → $150 → $250 → $500 → $1,000… with no level cap. New lives end below 10% of their starting money. Purchases take effect next life.' },
+  starting: { title: 'More Starting Money', description: 'Increase the house-funded first ball: $10 → $20 → $50 → $100 → $150 → $250 → $500 → $1,000… with no level cap. New lives end below 10% of their starting money. Purchases take effect next life.' },
 };
 
 function renderSkills(): void {

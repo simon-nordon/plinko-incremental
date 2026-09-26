@@ -5,7 +5,7 @@ export type ChargeKind = 'bouncy' | 'split' | 'bucket';
 export type SkillKind = ChargeKind | 'starting';
 export const CHARGES: readonly ChargeKind[] = ['bouncy', 'split', 'bucket'];
 export const SKILLS: readonly SkillKind[] = [...CHARGES, 'starting'];
-const EARLY_STARTS = [10, 50, 100, 150, 250, 500];
+const EARLY_STARTS = [10, 20, 50, 100, 150, 250, 500];
 const STARTING_STEPS = [1, 1.5, 2.5, 5];
 /** No gameplay cap: continue the same progression at each power of ten. */
 export function startingDropAt(level: number): number {
@@ -32,17 +32,17 @@ export class SkillTree {
   private levels: Levels = { bouncy: 0, split: 0, bucket: 0, starting: 0 };
 
   constructor(readonly mode: GameMode, private storage: Storage) {
-    this.key = `plinko-skills-${mode}-v3`;
+    this.key = `plinko-skills-${mode}-v4`;
     const current = storage.getItem(this.key);
-    const raw = current ?? storage.getItem(`plinko-skills-${mode}-v2`);
+    const raw = current ?? storage.getItem(`plinko-skills-${mode}-v3`) ?? storage.getItem(`plinko-skills-${mode}-v2`);
     if (raw === null) return;
     const saved = JSON.parse(raw);
-    const migrating = current === null && saved?.version === 2;
-    if ((!migrating && saved?.version !== 3) || !saved.levels) throw new Error('Invalid skill save');
-    if (migrating && saved.levels.starting > 3) throw new Error('Invalid legacy starting level');
+    const migrating = current === null && (saved?.version === 2 || saved?.version === 3);
+    if ((!migrating && saved?.version !== 4) || !saved.levels) throw new Error('Invalid skill save');
+    if (migrating && saved.version === 2 && saved.levels.starting > 3) throw new Error('Invalid legacy starting level');
     const levels = { ...saved.levels };
     // Previously purchased $150/$250/$500 starts keep their value; the base becomes $10.
-    if (migrating && levels.starting > 0) levels.starting += 2;
+    if (migrating && levels.starting > 0) levels.starting += saved.version === 2 ? 3 : 1;
     if (SKILLS.some(kind => !Number.isSafeInteger(levels[kind]) || levels[kind] < 0
       || (kind === 'starting' ? !Number.isFinite(startingDropAt(levels[kind]) * 10)
         : levels[kind] > (kind === 'bucket' ? MAX_ROWS + 1 : pegIds(MAX_ROWS).length)))) {
@@ -63,7 +63,7 @@ export class SkillTree {
   buy(run: GameRun, rows: number, kind: SkillKind): boolean {
     if (!this.canBuy(run, rows, kind)) return false;
     const levels = { ...this.levels, [kind]: this.level(kind) + 1 };
-    this.storage.setItem(this.key, JSON.stringify({ version: 3, levels }));
+    this.storage.setItem(this.key, JSON.stringify({ version: 4, levels }));
     run.spend(this.cost(kind));
     this.levels = levels;
     return true;
