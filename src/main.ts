@@ -294,7 +294,7 @@ function render(): void {
   const allInMode = mode === 'double';
   board.ballStyleOverride = allInMode ? { color: '#ef4444', deep: '#991b1b' } : null;
   el.lossThreshold.hidden = !allInMode;
-  el.lossThreshold.textContent = `Lose below ${fmtMoney(run.minimumBet)} · 10% of your life’s peak (minimum ${fmtMoney(run.houseStake * .1)}).`;
+  el.lossThreshold.textContent = `Forced cash out: ${fmtMoney(run.minimumBet)}`;
   renderTierButtons();
   el.balance.textContent = fmtMoney(balance);
   el.peak.textContent = fmtMoney(peak);
@@ -305,7 +305,7 @@ function render(): void {
   el.tiers.hidden = allInMode;
   el.dropStatus.hidden = allInMode || balance >= run.minimumBet || run.active === 0;
   el.allIn.hidden = el.allInRules.hidden = !allInMode;
-  el.allInRules.textContent = `First ball on the house, then wager your whole balance. Wait for every ball to land. Your loss threshold rises with your highest balance and never falls this life.`;
+  el.allInRules.textContent = 'Every drop bets your full balance.';
   el.allIn.disabled = busted || run.active > 0;
   el.allInLabel.textContent = run.houseDropAvailable ? 'Drop Ball · On the House'
     : run.active > 0 ? 'Drop in play' : 'Drop Ball · All In';
