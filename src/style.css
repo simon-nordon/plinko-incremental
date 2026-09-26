@@ -527,11 +527,15 @@ select:disabled {
 .skill-node .peg-symbol { width: 44px; height: 44px; font-size: 30px; }
 .skill-node > span:last-child { color: #d2bbff; font-size: 12px; }
 .skill-nodes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; width: 100%; }
-.skill-nodes .skill-node { width: 100%; min-width: 0; font-size: 12px; cursor: pointer; }
+.skill-nodes .skill-node { width: 100%; min-width: 0; padding: 14px 10px; gap: 8px; font-size: 12px; cursor: pointer; }
+.skill-nodes .peg-symbol { width: 32px; height: 32px; font-size: 23px; }
 .skill-node[aria-pressed='false'] { border-color: #536276; background: var(--side); box-shadow: none; }
 .return-node .peg-symbol { background: #6ee7b7; border-color: #6ee7b7; font-size: 18px; }
 .return-node[aria-pressed='true'] { border-color: #6ee7b7; }
-.pity-node { grid-column: 1 / -1; }
+.lucky-node .peg-symbol { background: #facc15; border-color: #facc15; }
+.lucky-node[aria-pressed='true'] { border-color: #facc15; }
+.duplicate-node .peg-symbol { background: #38bdf8; border-color: #38bdf8; }
+.duplicate-node[aria-pressed='true'] { border-color: #38bdf8; }
 .pity-node .peg-symbol { background: #fda4af; border-color: #fda4af; }
 .pity-node[aria-pressed='true'] { border-color: #fda4af; }
 .skill-detail[hidden] { display: none; }

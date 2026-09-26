@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Matter from 'matter-js';
 import { Board } from '../src/board';
+import { GameRun } from '../src/game';
+import { pegIds } from '../src/skills';
 import { DEFAULT_PHYSICS, MAX_ROWS, MIN_ROWS, type PhysicsSettings } from '../src/config';
 
 const STEP = 1 / 120;
@@ -9,8 +11,59 @@ const canvas = { getContext: () => ({}) } as unknown as HTMLCanvasElement;
 // Inspect physical state without adding a test-only interface to the game.
 const state = (board: Board) => board as unknown as {
   engine: Matter.Engine;
-  balls: { body: Matter.Body; r: number }[];
+  balls: { body: Matter.Body; r: number; share: number; splitPegs: Set<string> }[];
 };
+
+test('duplicate impacts create two half-value bodies and settle one conserved wager', () => seeded(() => {
+  const run = new GameRun('double');
+  const shares: number[] = [];
+  const board = new Board(canvas, { onPegHit() {}, onLand(_k, _tier, id, share) {
+    shares.push(share);
+    run.settle(id, 1, share);
+  } });
+  board.setLayout(16, []);
+  board.setSpecialPegs([], ['0:1']);
+  const wager = run.drop(0)!;
+  board.drop(0, wager.id);
+  board.update(STEP);
+  Matter.Body.setPosition(state(board).balls[0].body, { x: 380.5, y: 0 });
+  Matter.Body.setVelocity(state(board).balls[0].body, { x: 0, y: 0 });
+  for (let i = 0; i < 120 && board.active < 2; i++) board.update(STEP);
+  assert.equal(board.active, 2);
+  assert.deepEqual(state(board).balls.map(b => b.share), [.5, .5]);
+  assert.ok(state(board).balls.every(b => b.splitPegs.has('0:1')));
+  for (let i = 0; i < 120 * 31 && board.active; i++) board.update(STEP);
+  assert.deepEqual(shares, [.5, .5]);
+  assert.equal(run.balance, 100);
+  assert.equal(run.active, 0);
+}));
+
+test('lucky collision callbacks use child values and finish safely on a mixed board', () => seeded(() => {
+  const run = new GameRun('double');
+  let awarded = 0;
+  let hits = 0;
+  let landedShare = 0;
+  const board = new Board(canvas, { onPegHit() {}, onLuckyHit(id, share) {
+    hits++;
+    const amount = run.luckyHit(id, share);
+    awarded += amount;
+    assert.equal(run.payoutBalance, 100);
+    return amount;
+  }, onLand(_k, _tier, id, share) { landedShare += share; run.settle(id, 1, share); } });
+  board.setLayout(8, []);
+  const ids = pegIds(8);
+  board.setSpecialPegs(ids.filter((_, i) => i % 2 === 0), ids.filter((_, i) => i % 2 === 1));
+  const wager = run.drop(0)!;
+  board.drop(0, wager.id);
+  for (let i = 0; i < 120 * 31 && board.active; i++) {
+    board.update(STEP);
+    assert.ok(board.active <= 256);
+  }
+  assert.ok(hits > 0);
+  assert.equal(landedShare, 1);
+  assert.equal(run.balance, Math.round((100 + awarded) * 100) / 100);
+  assert.equal(run.active, 0);
+}));
 
 function seeded<T>(fn: () => T): T {
   const original = Math.random;
@@ -67,13 +120,13 @@ test('changing bounce affects new balls and preserves an existing ball rebound',
   assert.deepEqual(rebound(0.3, 5), rebound(0.3));
 });
 
-test('an upgraded peg doubles the resolved rebound without changing ordinary pegs', () => {
+test('an upgraded peg quadruples the resolved rebound without changing ordinary pegs', () => {
   for (const bounce of [0.3, DEFAULT_PHYSICS.bounce, 2]) {
     const normal = rebound(bounce);
     const upgraded = rebound(bounce, undefined, true);
-    assert.ok(Math.abs(upgraded.outwardSpeed / normal.outwardSpeed - 2) < 1e-9,
-      `expected 2× outward rebound at ${bounce}, got ${upgraded.outwardSpeed / normal.outwardSpeed}`);
-    assert.ok(Math.abs(upgraded.tangentSpeed - normal.tangentSpeed) < 1e-9);
+    const cap = Math.min(1, 16 / Math.hypot(normal.outwardSpeed * 4, normal.tangentSpeed));
+    assert.ok(Math.abs(upgraded.outwardSpeed - normal.outwardSpeed * 4 * cap) < 1e-9);
+    assert.ok(Math.abs(upgraded.tangentSpeed - normal.tangentSpeed * cap) < 1e-9);
     assert.ok(upgraded.height > normal.height);
   }
 });

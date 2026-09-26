@@ -67,6 +67,17 @@ const el = {
   pityBalance: $('pityBalance'),
   pityStatus: $('pityStatus'),
   buyPity: $<HTMLButtonElement>('buyPity'),
+  selectLucky: $<HTMLButtonElement>('selectLucky'),
+  selectDuplicate: $<HTMLButtonElement>('selectDuplicate'),
+  specialDetail: $('specialDetail'),
+  specialTitle: $('specialTitle'),
+  specialDescription: $('specialDescription'),
+  specialLevel: $('specialLevel'),
+  specialBalance: $('specialBalance'),
+  specialStatus: $('specialStatus'),
+  buySpecial: $<HTMLButtonElement>('buySpecial'),
+  luckyNodeLevel: $('luckyNodeLevel'),
+  duplicateNodeLevel: $('duplicateNodeLevel'),
   skillCount: $('skillCount'),
   nodeLevel: $('nodeLevel'),
   pegCount: $('pegCount'),
@@ -111,6 +122,7 @@ let resetArmed = 0;
 let visibleTiers: BallTier[] = [];
 let skills: SkillTree | null = null;
 let skillMessage = '';
+let selectedSpecial: 'lucky' | 'duplicate' = 'lucky';
 function loadSkills(): void {
   try {
     skills = new SkillTree(mode, localStorage);
@@ -125,28 +137,33 @@ loadSkills();
 const board = new Board($<HTMLCanvasElement>('board'), {
   onPegHit: (row, tier) => sfx.peg(row, 'normal', tier),
   onLand,
+  onLuckyHit: (id, share) => {
+    const award = run.luckyHit(id, share);
+    if (award > 0) { sfx.peg(0, 'gold', 0); render(); }
+    return award;
+  },
 });
 board.setPhysics(physics);
 
 function applyLayout(): void {
   board.setLayout(rows, []);
   board.setBouncyPegs(skills?.bouncyPegs ?? []);
+  board.setSpecialPegs(skills?.luckyPegs ?? [], skills?.duplicatePegs ?? []);
   applyLuck();
 }
 
 /** Luck adjusts every reference multiplier by the same percentage. */
 function applyLuck(): void {
   const payouts = payoutTable(risk, rows, luck);
-    // Double or Nothing has one all-in wager: include it so the temporary $0
-    // balance cannot activate Pity on a drop that started at $100 or more.
-    board.setMults(skills?.improvePayouts(payouts, run.balance + run.inPlay) ?? payouts);
+  // The original stake freezes Pity eligibility across rewards and split landings.
+  board.setMults(skills?.improvePayouts(payouts, run.payoutBalance) ?? payouts);
   el.luckValue.textContent = (luck > 0 ? '+' : luck < 0 ? '−' : '') + Math.abs(luck) + '%';
   el.luckNote.textContent = luck === 0
     ? 'Original reference payouts.'
       : `Every base payout × ${(1 + luck / 100).toFixed(2)}. A 2× bucket pays ${fmtMult(2 * (1 + luck / 100))}.`;
   if (skills?.returnLevel) el.luckNote.textContent += ` Bucket Return adds another +${skills.returnLevel * 5}% (×${skills.returnMultiplier.toFixed(2)}) to these payouts.`;
-  if (skills?.hasPity) el.luckNote.textContent += skills.pityActive(run.balance + run.inPlay)
-    ? ' Pity active: another +5% (×1.05).'
+  if (skills?.hasPity) el.luckNote.textContent += skills.pityActive(run.payoutBalance)
+    ? ` Pity active: another +${skills.pityLevel * 5}%.`
     : ' Pity inactive: activates below $100 before a drop.';
 }
 
@@ -193,9 +210,9 @@ function drop(tier: number): boolean {
   return true;
 }
 
-function onLand(k: number, tier: number, wagerId: number): void {
+function onLand(k: number, tier: number, wagerId: number, share: number): void {
   const mult = board.mults[k];
-  const result = run.settle(wagerId, mult);
+  const result = run.settle(wagerId, mult, share);
   if (!result) return;
   const { profit } = result;
   const color = bucketColor(k, board.buckets);
@@ -204,7 +221,7 @@ function onLand(k: number, tier: number, wagerId: number): void {
   board.bucketText(k, fmtChange(profit).replace(/\.00$/, ''), profit >= 0 ? '#4ade80' : '#f87171');
   if (mult >= 3) board.bucketBurst(k, color, Math.min(80, 10 + mult * 2));
   if (mult >= 10) board.addShake(Math.min(14, 3 + mult / 10));
-  pushHistory(mult, profit, color);
+  if (result.complete) pushHistory(result.totalPayout / result.wager.amount, result.totalProfit, color);
 
   // The run ends only once nothing is left in play and the cheapest ball is out of reach.
   if (run.busted) bust();
@@ -297,7 +314,7 @@ function render(): void {
   el.dropStatus.hidden = allInMode || balance >= run.minimumBet || run.active === 0;
   el.allIn.hidden = el.allInRules.hidden = !allInMode;
   el.allIn.disabled = busted || run.active > 0;
-  el.allInLabel.textContent = run.active > 0 ? 'Ball in play' : 'Drop Ball · All In';
+  el.allInLabel.textContent = run.active > 0 ? 'Drop in play' : 'Drop Ball · All In';
   el.allInAmount.textContent = fmtMoney(run.active > 0 ? run.inPlay : balance);
   el.reset.title = `Start over from ${fmtMoney(startingBalance(mode))}`;
   el.mute.textContent = sfx.muted ? '🔇' : '🔊';
@@ -308,8 +325,8 @@ function renderSkills(): void {
   el.openSkills.hidden = el.overSkills.hidden = mode !== 'double';
   const level = skills?.level ?? 0;
   const available = skills?.available(rows).length ?? 0;
-  const active = pegIds(rows).length - available;
-  el.skillCount.textContent = `${level + (skills?.returnLevel ?? 0) + Number(skills?.hasPity ?? false)} owned`;
+  const active = skills?.bouncyPegs.filter(id => pegIds(rows).includes(id)).length ?? 0;
+  el.skillCount.textContent = `${level + (skills?.returnLevel ?? 0) + (skills?.pityLevel ?? 0) + (skills?.luckyPegs.length ?? 0) + (skills?.duplicatePegs.length ?? 0)} owned`;
   el.nodeLevel.textContent = `Level ${level}`;
   el.pegCount.textContent = String(level);
   el.skillBalance.textContent = fmtMoney(run.balance);
@@ -335,17 +352,36 @@ function renderSkills(): void {
     : run.balance < returnCost ? `Need ${fmtMoney(returnCost - run.balance)} more.`
     : run.balance - returnCost < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : 'Paid from your current balance.');
   const pityOwned = skills?.hasPity ?? false;
-  const pityActive = skills?.pityActive(run.balance + run.inPlay) ?? false;
-  el.pityNodeState.textContent = pityOwned ? 'Owned' : 'Not owned';
-  el.pityActive.textContent = pityOwned ? (pityActive ? '+5% active' : 'Inactive') : 'Not owned';
+  const pityActive = skills?.pityActive(run.payoutBalance) ?? false;
+  const pityLevel = skills?.pityLevel ?? 0;
+  const pityCost = skills?.pityCost ?? 50;
+  el.pityNodeState.textContent = `Level ${pityLevel}`;
+  el.pityActive.textContent = pityOwned ? `+${pityLevel * 5}% ${pityActive ? 'active' : 'inactive'}` : 'Not owned';
   el.pityBalance.textContent = fmtMoney(run.balance);
   el.buyPity.disabled = !skills?.canBuyPity(run);
-  el.buyPity.textContent = pityOwned ? 'Unlocked permanently' : `Unlock · ${fmtMoney(skills?.pityCost ?? 50)}`;
-  el.pityStatus.textContent = skillMessage || (pityOwned ? 'Activates automatically on qualifying drops.'
-    : run.active ? 'Wait for your ball to land.'
+  el.buyPity.textContent = Number.isFinite(pityCost) ? `Upgrade · ${fmtMoney(pityCost)}` : 'Maximum level reached';
+  el.pityStatus.textContent = skillMessage || (run.active ? 'Wait for every ball to land.'
     : run.busted ? 'Start a new run to earn more money.'
-    : run.balance < 50 ? `Need ${fmtMoney(50 - run.balance)} more.`
-    : run.balance - 50 < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : 'Paid from your current balance.');
+    : run.balance < pityCost ? `Need ${fmtMoney(pityCost - run.balance)} more.`
+    : run.balance - pityCost < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : `Next level: +${(pityLevel + 1) * 5}% below $100.`);
+  const luckyLevel = skills?.luckyPegs.length ?? 0;
+  const duplicateLevel = skills?.duplicatePegs.length ?? 0;
+  el.luckyNodeLevel.textContent = `Level ${luckyLevel}`;
+  el.duplicateNodeLevel.textContent = `Level ${duplicateLevel}`;
+  el.specialTitle.textContent = selectedSpecial === 'lucky' ? 'Lucky Peg' : 'Duplicate Peg';
+  el.specialDescription.textContent = selectedSpecial === 'lucky'
+    ? 'Turn a random ordinary peg gold. Each hit immediately awards 10% of that ball’s current value, without reducing its bucket payout.'
+    : 'Turn a random ordinary peg blue. On impact, a ball becomes two balls worth 50% each. Children can split on other blue pegs; the same peg cannot split that family again.';
+  el.specialLevel.textContent = String(selectedSpecial === 'lucky' ? luckyLevel : duplicateLevel);
+  el.specialBalance.textContent = fmtMoney(run.balance);
+  const specialCost = skills?.pegCost(selectedSpecial) ?? 50;
+  el.buySpecial.disabled = !skills?.canBuyPeg(run, rows, selectedSpecial);
+  el.buySpecial.textContent = available === 0 ? 'No ordinary pegs left' : `Upgrade · ${fmtMoney(specialCost)}`;
+  el.specialStatus.textContent = skillMessage || (run.active ? 'Wait for every ball to land.'
+    : run.busted ? 'Start a new run to earn more money.'
+    : !available ? 'All visible pegs already have an upgrade.'
+    : run.balance < specialCost ? `Need ${fmtMoney(specialCost - run.balance)} more.`
+    : run.balance - specialCost < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : 'Paid from your current balance.');
 }
 
 // ---- wiring ----
@@ -371,25 +407,44 @@ el.openSkills.addEventListener('click', () => {
   el.skills.showModal();
 });
 el.closeSkills.addEventListener('click', () => el.skills.close());
-function selectSkill(selected: 'bouncy' | 'return' | 'pity'): void {
+function selectSkill(selected: 'bouncy' | 'return' | 'pity' | 'lucky' | 'duplicate'): void {
   el.bouncyDetail.hidden = selected !== 'bouncy';
   el.returnDetail.hidden = selected !== 'return';
   el.pityDetail.hidden = selected !== 'pity';
+  el.specialDetail.hidden = selected !== 'lucky' && selected !== 'duplicate';
+  if (selected === 'lucky' || selected === 'duplicate') selectedSpecial = selected;
   el.selectBouncy.setAttribute('aria-pressed', String(selected === 'bouncy'));
   el.selectReturn.setAttribute('aria-pressed', String(selected === 'return'));
   el.selectPity.setAttribute('aria-pressed', String(selected === 'pity'));
+  el.selectLucky.setAttribute('aria-pressed', String(selected === 'lucky'));
+  el.selectDuplicate.setAttribute('aria-pressed', String(selected === 'duplicate'));
   if (skills) skillMessage = '';
   renderSkills();
 }
 el.selectBouncy.addEventListener('click', () => selectSkill('bouncy'));
 el.selectReturn.addEventListener('click', () => selectSkill('return'));
 el.selectPity.addEventListener('click', () => selectSkill('pity'));
+el.selectLucky.addEventListener('click', () => selectSkill('lucky'));
+el.selectDuplicate.addEventListener('click', () => selectSkill('duplicate'));
+el.buySpecial.addEventListener('click', () => {
+  try {
+    const id = skills?.buyPeg(run, rows, selectedSpecial);
+    if (!id) return;
+    board.setSpecialPegs(skills!.luckyPegs, skills!.duplicatePegs);
+    sfx.unlock();
+    sfx.buy();
+    const [row, column] = id.split(':').map(Number);
+    skillMessage = `${selectedSpecial === 'lucky' ? 'Lucky' : 'Duplicate'} peg saved: row ${row + 1}, peg ${column + 1}.`;
+    if (run.busted) { el.skills.close(); bust(); }
+  } catch { skillMessage = 'Could not save the upgrade. No money was spent. Please try again.'; }
+  render();
+});
 el.buyPity.addEventListener('click', () => {
   try {
     if (!skills?.buyPity(run)) return;
     sfx.unlock();
     sfx.buy();
-    skillMessage = 'Pity unlocked. Permanently saved.';
+    skillMessage = `Pity upgraded to +${skills.pityLevel * 5}%. Permanently saved.`;
     if (run.busted) { el.skills.close(); bust(); }
   } catch {
     skillMessage = 'Could not save the upgrade. No money was spent. Please try again.';

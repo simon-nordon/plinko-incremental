@@ -11,7 +11,9 @@ const validPegs = new Set(pegIds(MAX_ROWS));
 export class SkillTree {
   private owned: string[] = [];
   private returns = 0;
-  private pity = false;
+  private pity = 0;
+  private lucky: string[] = [];
+  private duplicate: string[] = [];
   readonly key: string;
 
   constructor(readonly mode: GameMode, private storage: Storage) {
@@ -23,12 +25,20 @@ export class SkillTree {
       || saved.bouncyPegs.some((id: unknown) => typeof id !== 'string' || !validPegs.has(id))
       || new Set(saved.bouncyPegs).size !== saved.bouncyPegs.length
       || (saved.returnLevel !== undefined && (!Number.isSafeInteger(saved.returnLevel) || saved.returnLevel < 0))
-      || (saved.pity !== undefined && typeof saved.pity !== 'boolean')) {
+      || (saved.pity !== undefined && typeof saved.pity !== 'boolean')
+      || (saved.pityLevel !== undefined && (!Number.isSafeInteger(saved.pityLevel) || saved.pityLevel < 0))) {
       throw new Error('Invalid skill save');
     }
     this.owned = [...saved.bouncyPegs];
     this.returns = saved.returnLevel ?? 0;
-    this.pity = saved.pity ?? false;
+    this.pity = saved.pityLevel ?? Number(saved.pity ?? false);
+    const lucky = saved.luckyPegs ?? [];
+    const duplicate = saved.duplicatePegs ?? [];
+    if (!Array.isArray(lucky) || !Array.isArray(duplicate)) throw new Error('Invalid peg save');
+    const all = [...this.owned, ...lucky, ...duplicate];
+    if (all.some(id => !validPegs.has(id)) || new Set(all).size !== all.length) throw new Error('Invalid peg save');
+    this.lucky = lucky;
+    this.duplicate = duplicate;
   }
 
   get bouncyPegs(): readonly string[] { return this.mode === 'double' ? this.owned : []; }
@@ -37,23 +47,43 @@ export class SkillTree {
   get returnLevel(): number { return this.mode === 'double' ? this.returns : 0; }
   get returnMultiplier(): number { return 1 + this.returnLevel * 0.05; }
   get returnCost(): number { return 50 * 2 ** this.returnLevel; }
-  get hasPity(): boolean { return this.mode === 'double' && this.pity; }
-  readonly pityCost = 50;
+  get pityLevel(): number { return this.mode === 'double' ? this.pity : 0; }
+  get hasPity(): boolean { return this.pityLevel > 0; }
+  get pityCost(): number { return 50 * 2 ** this.pityLevel; }
+  get luckyPegs(): readonly string[] { return this.mode === 'double' ? this.lucky : []; }
+  get duplicatePegs(): readonly string[] { return this.mode === 'double' ? this.duplicate : []; }
+  pegCost(kind: 'lucky' | 'duplicate'): number { return 50 * 2 ** (kind === 'lucky' ? this.luckyPegs.length : this.duplicatePegs.length); }
+  canBuyPeg(run: GameRun, rows: number, kind: 'lucky' | 'duplicate'): boolean {
+    return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.pegCost(kind)) && this.available(rows).length > 0;
+  }
+  buyPeg(run: GameRun, rows: number, kind: 'lucky' | 'duplicate', random = Math.random): string | null {
+    if (!this.canBuyPeg(run, rows, kind)) return null;
+    const choices = this.available(rows);
+    const id = choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))];
+    const cost = this.pegCost(kind);
+    const lucky = kind === 'lucky' ? [...this.lucky, id] : this.lucky;
+    const duplicate = kind === 'duplicate' ? [...this.duplicate, id] : this.duplicate;
+    this.save(this.owned, this.returns, this.pity, lucky, duplicate);
+    run.spend(cost);
+    this.lucky = lucky;
+    this.duplicate = duplicate;
+    return id;
+  }
   pityActive(balanceBeforeDrop: number): boolean {
     return this.hasPity && balanceBeforeDrop < 100;
   }
   improvePayouts(payouts: number[], balanceBeforeDrop = Infinity): number[] {
-    const pityMultiplier = this.pityActive(balanceBeforeDrop) ? 1.05 : 1;
+    const pityMultiplier = this.pityActive(balanceBeforeDrop) ? 1 + this.pityLevel * .05 : 1;
     return payouts.map(value => value * this.returnMultiplier * pityMultiplier);
   }
   canBuyPity(run: GameRun): boolean {
-    return this.mode === 'double' && run.mode === this.mode && !this.hasPity && run.canSpend(this.pityCost);
+    return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.pityCost);
   }
   buyPity(run: GameRun): boolean {
     if (!this.canBuyPity(run)) return false;
-    this.save(this.owned, this.returns, true);
+    this.save(this.owned, this.returns, this.pity + 1);
     run.spend(this.pityCost);
-    this.pity = true;
+    this.pity++;
     return true;
   }
   canBuyReturn(run: GameRun): boolean {
@@ -66,11 +96,11 @@ export class SkillTree {
     this.returns++;
     return true;
   }
-  private save(bouncyPegs: string[], returnLevel: number, pity = this.pity): void {
-    this.storage.setItem(this.key, JSON.stringify({ version: 1, bouncyPegs, returnLevel, pity }));
+  private save(bouncyPegs: string[], returnLevel: number, pityLevel = this.pity, luckyPegs = this.lucky, duplicatePegs = this.duplicate): void {
+    this.storage.setItem(this.key, JSON.stringify({ version: 1, bouncyPegs, returnLevel, pityLevel, luckyPegs, duplicatePegs }));
   }
   available(rows: number): string[] {
-    const owned = new Set(this.bouncyPegs);
+    const owned = new Set([...this.bouncyPegs, ...this.luckyPegs, ...this.duplicatePegs]);
     return pegIds(rows).filter(id => !owned.has(id));
   }
   canBuy(run: GameRun, rows: number): boolean {

@@ -29,7 +29,7 @@
           <span id="allInLabel">Drop Ball · All In</span>
           <span id="allInAmount" class="all-in-amount">$100.00</span>
         </button>
-        <p id="allInRules" class="mode-note" hidden>Start with $100. One ball at a time. Below $10 ends the game.</p>
+        <p id="allInRules" class="mode-note" hidden>Start with $100. One drop at a time; wait for all split balls to land. Below $10 ends the game.</p>
         <button id="openSkills" class="skills-button" hidden><span class="peg-symbol" aria-hidden="true">↟</span><span>Skill tree</span><span id="skillCount" class="skill-count">0 owned</span></button>
 
         <div class="board-settings">
@@ -118,13 +118,15 @@
             <button id="selectBouncy" class="skill-node" aria-pressed="true"><span class="peg-symbol" aria-hidden="true">↟</span><strong>Bouncy Peg</strong><span id="nodeLevel">Level 0</span></button>
             <button id="selectReturn" class="skill-node return-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">+%</span><strong>Bucket Return</strong><span id="returnNodeLevel">Level 0</span></button>
             <button id="selectPity" class="skill-node pity-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">♥</span><strong>Pity</strong><span id="pityNodeState">Not owned</span></button>
+            <button id="selectLucky" class="skill-node lucky-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">$</span><strong>Lucky Peg</strong><span id="luckyNodeLevel">Level 0</span></button>
+            <button id="selectDuplicate" class="skill-node duplicate-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">⑂</span><strong>Duplicate Peg</strong><span id="duplicateNodeLevel">Level 0</span></button>
           </div>
           <span class="permanent-tag">Permanent upgrade</span>
         </div>
         <section id="bouncyDetail" class="skill-detail" aria-labelledby="bouncyTitle">
           <p class="eyebrow">Board upgrade</p>
           <h3 id="bouncyTitle">Bouncy Peg</h3>
-          <p>Turn one random ordinary peg purple. Balls rebound off it with <strong>2× the normal bounce</strong>.</p>
+          <p>Turn one random ordinary peg purple. Balls rebound off it with <strong>4× the normal bounce</strong>.</p>
           <div class="skill-stats"><div><span>Upgraded pegs</span><strong id="pegCount">0</strong></div><div><span>Your balance</span><strong id="skillBalance">$100</strong></div></div>
           <p id="pegCoverage" class="mode-note"></p>
           <div class="skill-buy-area">
@@ -148,13 +150,24 @@
         <section id="pityDetail" class="skill-detail" aria-labelledby="pityTitle" hidden>
           <p class="eyebrow">Comeback upgrade</p>
           <h3 id="pityTitle">Pity</h3>
-          <p>Increase every bucket's return by <strong>5% when your balance is below $100 before the drop</strong>. Stacks with Bucket Return and Luck.</p>
+          <p>Increase every bucket's return by <strong>5% per level when your balance is below $100 before the drop</strong>. Bonuses add up: +5%, +10%, +15%… Stacks with Bucket Return and Luck.</p>
           <div class="skill-stats"><div><span>Bonus status</span><strong id="pityActive">Not owned</strong></div><div><span>Your balance</span><strong id="pityBalance">$100</strong></div></div>
           <p class="mode-note">Exactly $100 does not qualify. Going all-in keeps the bonus status from before the drop.</p>
           <div class="skill-buy-area">
-            <p class="mode-note">One-time unlock. Kept permanently after losing.</p>
+            <p class="mode-note">Repeatable upgrade. Cost doubles each time. Kept permanently after losing.</p>
             <button id="buyPity" class="buy-skill">Unlock · $50</button>
             <p id="pityStatus" class="mode-note" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+        <section id="specialDetail" class="skill-detail" aria-labelledby="specialTitle" hidden>
+          <p class="eyebrow">Board upgrade</p>
+          <h3 id="specialTitle">Lucky Peg</h3>
+          <p id="specialDescription"></p>
+          <div class="skill-stats"><div><span>Upgraded pegs</span><strong id="specialLevel">0</strong></div><div><span>Your balance</span><strong id="specialBalance">$100</strong></div></div>
+          <div class="skill-buy-area">
+            <p class="mode-note">Each purchase upgrades another ordinary peg. Cost doubles each time. Permanent across runs.</p>
+            <button id="buySpecial" class="buy-skill">Upgrade · $50</button>
+            <p id="specialStatus" class="mode-note" role="status" aria-live="polite"></p>
           </div>
         </section>
       </div>

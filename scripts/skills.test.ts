@@ -45,7 +45,7 @@ test('Pity stacks with other bonuses and follows balance changes between drops',
   assert.equal(tree.pityActive(run.balance), false);
 });
 
-test('Pity is a one-time purchase retained alongside older skills after death and reload', () => {
+test('Pity levels survive death and reload alongside older skills', () => {
   const storage = memoryStorage();
   storage.setItem('plinko-skills-double-v1', JSON.stringify({ version: 1, bouncyPegs: ['0:1'], returnLevel: 2 }));
   const tree = new SkillTree('double', storage);
@@ -59,14 +59,64 @@ test('Pity is a one-time purchase retained alongside older skills after death an
   assert.equal(restored.returnLevel, 2);
   assert.deepEqual(restored.bouncyPegs, ['0:1']);
   const fresh = new GameRun('double');
-  assert.equal(restored.buyPity(fresh), false);
-  assert.equal(fresh.balance, 100);
+  assert.equal(restored.buyPity(fresh), true);
+  assert.equal(fresh.balance, 0);
+  assert.equal(restored.pityLevel, 2);
+  fresh.balance = 100;
   restored.buy(fresh, 8);
   assert.equal(new SkillTree('double', storage).hasPity, true);
   const classic = new SkillTree('classic', storage);
   assert.equal(classic.buyPity(new GameRun('double')), false);
   assert.deepEqual(classic.improvePayouts([1, 2], 50), [1, 2]);
   assert.equal(tree.buyPity(new GameRun('classic')), false);
+});
+
+test('legacy Pity unlock becomes level one and repeated purchases add five percentage points', () => {
+  const storage = memoryStorage();
+  storage.setItem('plinko-skills-double-v1', JSON.stringify({ version: 1, bouncyPegs: [], pity: true }));
+  const tree = new SkillTree('double', storage);
+  assert.equal(tree.pityLevel, 1);
+  const run = new GameRun('double');
+  run.balance = 1000;
+  for (const level of [2, 3, 4]) {
+    assert.equal(tree.pityCost, 50 * 2 ** (level - 1));
+    assert.ok(tree.buyPity(run));
+    assert.deepEqual(tree.improvePayouts([1, 2], 99), [1, 2].map(n => n * (1 + level * .05)));
+    assert.deepEqual(tree.improvePayouts([1, 2], 100), [1, 2]);
+  }
+  assert.equal(new SkillTree('double', storage).pityLevel, 4);
+});
+
+test('peg types select unique ordinary pegs with separate costs and persistent saves', () => {
+  const storage = memoryStorage();
+  const tree = new SkillTree('double', storage);
+  const run = new GameRun('double');
+  run.balance = 1000;
+  tree.buy(run, 8, () => 0);
+  for (const kind of ['lucky', 'duplicate'] as const) {
+    assert.equal(tree.pegCost(kind), 50);
+    assert.ok(tree.buyPeg(run, 8, kind, () => 0));
+    assert.equal(tree.pegCost(kind), 100);
+    assert.ok(tree.buyPeg(run, 8, kind, () => 0));
+  }
+  assert.equal(run.balance, 650);
+  const restored = new SkillTree('double', storage);
+  assert.equal(new Set([...restored.bouncyPegs, ...restored.luckyPegs, ...restored.duplicatePegs]).size, 5);
+  assert.equal(restored.available(8).length, pegIds(8).length - 5);
+  assert.equal(new SkillTree('classic', storage).luckyPegs.length, 0);
+  assert.equal(new SkillTree('classic', storage).duplicatePegs.length, 0);
+  for (const kind of ['lucky', 'duplicate'] as const) {
+    assert.equal(restored.buyPeg(new GameRun('classic'), 8, kind), null);
+    const poor = new GameRun('double');
+    assert.equal(restored.buyPeg(poor, 8, kind), null);
+    const busy = new GameRun('double');
+    busy.drop(0);
+    assert.equal(restored.buyPeg(busy, 8, kind), null);
+    const broken = new SkillTree('double', { getItem: () => null, setItem() { throw new Error('quota'); } });
+    const fresh = new GameRun('double');
+    assert.throws(() => broken.buyPeg(fresh, 8, kind));
+    assert.equal(fresh.balance, 100);
+  }
 });
 
 test('Pity purchase fails safely when in flight, unaffordable or unable to save', () => {

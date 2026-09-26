@@ -3,6 +3,38 @@ import { test } from 'node:test';
 import { fmtChange } from '../src/format';
 import { GameRun } from '../src/game';
 
+test('split landings conserve the stake and wait for all children before accepting another drop', () => {
+  const game = new GameRun('double');
+  const bet = game.drop(0)!;
+  const first = game.settle(bet.id, .1, .5)!;
+  assert.equal(first.payout, 5);
+  assert.equal(first.complete, false);
+  assert.equal(game.busted, false);
+  assert.equal(game.drop(0), null);
+  assert.equal(game.payoutBalance, 100);
+  assert.equal(game.inPlay, 50);
+  assert.equal(game.luckyHit(bet.id, .25), 2.5);
+  assert.equal(game.payoutBalance, 100);
+  game.settle(bet.id, 2, .25);
+  const last = game.settle(bet.id, 0, .25)!;
+  assert.equal(last.complete, true);
+  assert.equal(last.totalProfit, -42.5);
+  assert.equal(game.balance, 57.5);
+  assert.equal(game.active, 0);
+  assert.equal(game.settle(bet.id, 1000, .25), null);
+  assert.equal(game.luckyHit(bet.id, 1), 0);
+});
+
+test('fractional cents are carried across children rather than created by rounding each ball', () => {
+  const game = new GameRun('double');
+  game.balance = 10.01;
+  const bet = game.drop(0)!;
+  for (let i = 0; i < 128; i++) game.luckyHit(bet.id, 1 / 128);
+  for (let i = 0; i < 128; i++) game.settle(bet.id, 1, 1 / 128);
+  assert.equal(game.balance, 11.01);
+  assert.equal(game.active, 0);
+});
+
 test('Double or Nothing starts at $100, stakes everything, and blocks additional balls', () => {
   const game = new GameRun('double');
   assert.equal(game.balance, 100);
