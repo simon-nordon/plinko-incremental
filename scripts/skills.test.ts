@@ -34,11 +34,11 @@ test('developer reset clears both modes and legacy saves without touching other 
   for (const kind of SKILLS) assert.equal(fresh.level(kind), 0);
 });
 
-test('charge prices are halved, grow independently, and spend earned money', () => {
+test('peg prices start at $10 and bucket prices at $25, doubling independently from earned money', () => {
   const tree = new SkillTree('double', memoryStorage());
   const run = earned(10000);
   for (const kind of CHARGES) {
-    for (const cost of [25, 50, 100, 200]) {
+    for (const cost of kind === 'bucket' ? [25, 50, 100, 200] : [10, 20, 40, 80]) {
       assert.equal(tree.cost(kind), cost);
       const before = run.balance;
       assert.ok(tree.buy(run, 8, kind));
@@ -61,7 +61,7 @@ test('house money, in-flight proceeds, insufficient cash and Normal mode cannot 
   assert.ok(tree.buy(run, 8, 'bouncy'));
   const classic = new SkillTree('classic', storage);
   for (const kind of SKILLS) {
-    assert.equal(tree.buy(earned(20), 8, kind), false);
+    assert.equal(tree.buy(earned(9), 8, kind), false);
     assert.equal(tree.buy(new GameRun('classic'), 8, kind), false);
     assert.equal(classic.buy(earned(), 8, kind), false);
     assert.equal(classic.level(kind), 0);
@@ -228,7 +228,7 @@ test('purchase caps match the visible layout and excess unlocks return on a larg
 test('spending the last money ends the life while keeping the bought upgrade', () => {
   const storage = memoryStorage();
   const tree = new SkillTree('double', storage);
-  const run = earned(25);
+  const run = earned(10);
   assert.ok(tree.buy(run, 8, 'split'));
   assert.equal(run.busted, true);
   assert.equal(new SkillTree('double', storage).level('split'), 1);

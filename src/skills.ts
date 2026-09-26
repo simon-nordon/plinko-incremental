@@ -54,7 +54,8 @@ export class SkillTree {
   level(kind: SkillKind): number { return this.mode === 'double' ? this.levels[kind] : 0; }
   get startingDrop(): number { return startingDropAt(this.level('starting')); }
   cost(kind: SkillKind): number {
-    return kind === 'starting' ? startingDropAt(this.level(kind) + 1) * 10 : 25 * 2 ** this.level(kind);
+    return kind === 'starting' ? startingDropAt(this.level(kind) + 1) * 10
+      : (kind === 'bucket' ? 25 : 10) * 2 ** this.level(kind);
   }
   canBuy(run: GameRun, rows: number, kind: SkillKind): boolean {
     return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.cost(kind))
