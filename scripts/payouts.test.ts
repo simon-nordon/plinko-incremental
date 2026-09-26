@@ -10,13 +10,19 @@ test('zero luck uses the original reference table without fitting or stretching'
   assert.deepEqual(payoutTable('extreme', 16, 0), [1000, 130, 26, 9, 4, 2, .2, .2, .2, .2, .2, 2, 4, 9, 26, 130, 1000]);
 });
 
-test('new High lies halfway between Medium and Extreme with no break-even buckets', () => {
+test('High has tidy intermediate payouts, a 0.2 center and no break-even buckets', () => {
   for (let rows = MIN_ROWS; rows <= MAX_ROWS; rows++) {
     const medium = payoutTable('medium', rows, 0);
     const extreme = payoutTable('extreme', rows, 0);
     const high = payoutTable('high', rows, 0);
     assert.ok(!high.includes(1));
-    high.forEach((value, i) => assert.ok(Math.abs(value - (medium[i] + extreme[i]) / 2) < 1e-10));
+    assert.equal(high[Math.floor(rows / 2)], .2);
+    assert.equal(high[Math.ceil(rows / 2)], .2);
+    high.forEach((value, i) => {
+      assert.ok(Math.abs(value * 10 - Math.round(value * 10)) < 1e-10, 'at most one decimal place');
+      assert.ok(value >= Math.min(medium[i], extreme[i]) && value <= Math.max(medium[i], extreme[i]));
+      if (i > 0 && i <= rows / 2) assert.ok(value <= high[i - 1]);
+    });
   }
 });
 
