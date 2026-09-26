@@ -20,6 +20,22 @@ export const interiorPegIds = (rows: number): string[] => pegIds(rows).filter(id
   const [row, column] = id.split(':').map(Number);
   return column > 0 && column < row + 2;
 });
+/** Smooth bias toward the triangle's center, with every interior peg still eligible. */
+export function pegSpawnWeight(id: string, rows: number): number {
+  const [row, column] = id.split(':').map(Number);
+  const x = (column - (row + 2) / 2) / (rows / 4);
+  const y = (row - (rows - 1) * 2 / 3) / (rows / 3);
+  return .15 + Math.exp(-(x * x + y * y) / 2);
+}
+function weightedPeg(choices: string[], rows: number, random: () => number): string {
+  const weights = choices.map(id => pegSpawnWeight(id, rows));
+  let roll = Math.max(0, Math.min(1, random())) * weights.reduce((sum, weight) => sum + weight, 0);
+  for (let i = 0; i < choices.length; i++) {
+    roll -= weights[i];
+    if (roll < 0) return choices[i];
+  }
+  return choices[choices.length - 1];
+}
 const targets = (kind: ChargeKind, rows: number): string[] => kind === 'bucket'
   ? Array.from({ length: rows + 1 }, (_, i) => String(i)) : interiorPegIds(rows);
 export const luckyBucketReturn = (base: number): number => base * 2;
@@ -55,7 +71,7 @@ export class SkillTree {
   get startingDrop(): number { return startingDropAt(this.level('starting')); }
   cost(kind: SkillKind): number {
     return kind === 'starting' ? startingDropAt(this.level(kind) + 1) * 10
-      : (kind === 'bucket' ? 25 : 10) * 2 ** this.level(kind);
+      : 10 * 2 ** this.level(kind);
   }
   canBuy(run: GameRun, rows: number, kind: SkillKind): boolean {
     return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.cost(kind))
@@ -80,11 +96,23 @@ export class LifeSkills {
   /** Newly purchased unlocks add one charge; previously consumed charges stay spent. */
   sync(skills: SkillTree | null): void {
     for (const kind of CHARGES) {
-      const choices = targets(kind, this.rows).filter(id => !this.assigned[kind].has(id));
-      const count = Math.min(skills?.level(kind) ?? 0, targets(kind, this.rows).length);
+      const all = targets(kind, this.rows);
+      const choices = all.filter(id => !this.assigned[kind].has(id));
+      const count = Math.min(skills?.level(kind) ?? 0, all.length);
       while (this.assigned[kind].size < count && choices.length) {
-        const index = Math.min(choices.length - 1, Math.max(0, Math.floor(this.random() * choices.length)));
-        const [id] = choices.splice(index, 1);
+        let id: string;
+        if (kind === 'bucket') {
+          const index = Math.min(choices.length - 1, Math.max(0, Math.floor(this.random() * choices.length)));
+          id = choices[index];
+        } else {
+          id = weightedPeg(all, this.rows, this.random);
+          if (this.assigned.bouncy.has(id) || this.assigned.split.has(id)) {
+            // One reroll, excluding this type's existing assignments (including spent ones).
+            // The other type may still share the result, preserving stacked effects.
+            id = weightedPeg(choices, this.rows, this.random);
+          }
+        }
+        choices.splice(choices.indexOf(id), 1);
         this.assigned[kind].add(id);
         this.charged[kind].add(id);
       }

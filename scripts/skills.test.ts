@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { GameRun } from '../src/game';
-import { SkillTree, LifeSkills, SKILLS, CHARGES, pegIds, interiorPegIds, luckyBucketReturn, startingDropAt } from '../src/skills';
+import { SkillTree, LifeSkills, SKILLS, CHARGES, pegIds, interiorPegIds, pegSpawnWeight, luckyBucketReturn, startingDropAt } from '../src/skills';
 import { payoutTable } from '../src/payouts';
 import { resetAllProgress } from '../src/progress';
 
@@ -34,11 +34,11 @@ test('developer reset clears both modes and legacy saves without touching other 
   for (const kind of SKILLS) assert.equal(fresh.level(kind), 0);
 });
 
-test('peg prices start at $10 and bucket prices at $25, doubling independently from earned money', () => {
+test('all charge prices start at $10, doubling independently from earned money', () => {
   const tree = new SkillTree('double', memoryStorage());
   const run = earned(10000);
   for (const kind of CHARGES) {
-    for (const cost of kind === 'bucket' ? [25, 50, 100, 200] : [10, 20, 40, 80]) {
+    for (const cost of [10, 20, 40, 80]) {
       assert.equal(tree.cost(kind), cost);
       const before = run.balance;
       assert.ok(tree.buy(run, 8, kind));
@@ -188,6 +188,33 @@ test('version 3 saves retain starting amounts after inserting the $20 upgrade', 
     assert.ok(tree.buy(earned(), 8, 'bucket'));
     assert.equal(new SkillTree('double', storage).startingDrop, amount);
     assert.equal(storage.getItem('plinko-skills-double-v3'), raw);
+  }
+});
+
+test('occupied pegs reroll once, preserve stacking and never reroll spent charges on sync', () => {
+  const tree = new SkillTree('double', memoryStorage());
+  const run = earned();
+  tree.buy(run, 8, 'bouncy');
+  tree.buy(run, 8, 'bouncy');
+  tree.buy(run, 8, 'split');
+  let rolls = 0;
+  const life = new LifeSkills(8, tree, () => { rolls++; return 0; });
+  assert.equal(rolls, 5, 'first placement rolls once, each occupied roll gets exactly one retry');
+  assert.deepEqual(life.remaining('bouncy'), ['0:1', '1:1']);
+  assert.deepEqual(life.remaining('split'), ['0:1']);
+  life.consume('bouncy', '0:1');
+  life.sync(tree);
+  assert.equal(rolls, 5);
+  assert.deepEqual(life.remaining('bouncy'), ['1:1']);
+});
+
+test('spawn weights favor the triangle center while keeping all interior pegs possible', () => {
+  for (let rows = 8; rows <= 16; rows++) {
+    const row = Math.round((rows - 1) * 2 / 3);
+    const center = `${row}:${Math.round((row + 2) / 2)}`;
+    assert.ok(pegSpawnWeight(center, rows) > pegSpawnWeight(`${row}:1`, rows));
+    assert.ok(pegSpawnWeight(center, rows) > pegSpawnWeight('0:1', rows));
+    assert.ok(interiorPegIds(rows).every(id => pegSpawnWeight(id, rows) > 0));
   }
 });
 
