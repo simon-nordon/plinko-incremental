@@ -17,7 +17,7 @@ import { fmt, fmtChange, fmtMoney, fmtMult } from './format';
 import { GameRun, type GameMode } from './game';
 import { payoutTable } from './payouts';
 import { affordableTiers, type BallTier } from './tiers';
-import { SkillTree, LifeSkills, SKILLS, STARTING_DROPS, type SkillKind } from './skills';
+import { SkillTree, LifeSkills, SKILLS, startingDropAt, type SkillKind } from './skills';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -108,13 +108,14 @@ function loadSkills(): void {
   }
 }
 loadSkills();
-function freshRun(): GameRun { return new GameRun(mode, skills?.startingDrop ?? 100); }
+function freshRun(): GameRun { return new GameRun(mode, skills?.startingDrop ?? 10); }
 let run = freshRun();
 let lifeSkills = new LifeSkills(rows, skills);
 
 const board = new Board($<HTMLCanvasElement>('board'), {
   onPegHit: (row, tier) => sfx.peg(row, 'normal', tier),
   onLand,
+  onDuplicate: id => { run.duplicate(id); render(); },
   onChargeUsed: (kind, id) => {
     lifeSkills.consume(kind, id);
     renderSkills();
@@ -292,22 +293,23 @@ function render(): void {
   el.tiers.hidden = allInMode;
   el.dropStatus.hidden = allInMode || balance >= run.minimumBet || run.active === 0;
   el.allIn.hidden = el.allInRules.hidden = !allInMode;
+  el.allInRules.textContent = `First ball on the house, then wager your whole balance. Wait for every ball to land. Below ${fmtMoney(run.minimumBet)} ends this life (10% of its starting money).`;
   el.allIn.disabled = busted || run.active > 0;
   el.allInLabel.textContent = run.houseDropAvailable ? 'Drop Ball · On the House'
     : run.active > 0 ? 'Drop in play' : 'Drop Ball · All In';
   el.allInAmount.textContent = fmtMoney(run.houseDropAvailable ? run.houseStake : run.active > 0 ? run.inPlay : balance);
   el.houseNote.hidden = !run.houseDropAvailable;
   el.houseNote.textContent = `Your first ${fmtMoney(run.houseStake)} ball is on the house. Only its winnings can buy upgrades.`;
-  el.reset.title = allInMode ? `New life with a ${fmtMoney(skills?.startingDrop ?? 100)} house ball` : 'Start over from $5';
+  el.reset.title = allInMode ? `New life with a ${fmtMoney(skills?.startingDrop ?? 10)} house ball` : 'Start over from $5';
   el.mute.textContent = sfx.muted ? '🔇' : '🔊';
   renderSkills();
 }
 
 const skillInfo: Record<SkillKind, { title: string; description: string }> = {
-  bouncy: { title: 'Bouncy Peg', description: 'One random purple peg rebounds a ball with 4× the normal bounce, then becomes ordinary. It can share a peg with Split. Each level adds another one-use peg per life.' },
-  split: { title: 'Split Peg', description: 'One random blue peg splits a ball into two balls worth 50% each, then becomes ordinary. It can share a peg with Bouncy. Each level adds another one-use peg per life.' },
-  bucket: { title: 'Lucky Bucket', description: 'One random gold bucket pays the next whole multiplier: 0.4× → 1×, 0.7× → 1×, 1.2× → 2×. Only the first ball gets the bonus, then it returns to normal. Each level adds another lucky bucket per life.' },
-  starting: { title: 'More Starting Money', description: 'Increase the house-funded first ball of every new life: $100 → $150 → $250 → $500. This money cannot buy upgrades until the ball lands. Purchases take effect next life.' },
+  bouncy: { title: 'Bouncy Peg', description: 'One random interior peg gives a strong, fixed kick along the tangent at contact—even on a grazing hit—then becomes ordinary. It can also be a Split Peg. Each level adds one charge per life.' },
+  split: { title: 'Split Peg', description: 'One random interior peg duplicates a ball. Both balls keep the full original value. The peg then becomes ordinary. It can also be Bouncy. Each level adds one charge per life.' },
+  bucket: { title: 'Golden Bucket', description: 'One random gold bucket doubles its return: 0.3× → 0.6×, 110× → 220×. Only the first ball gets the bonus, then it returns to normal. Each level adds another golden bucket per life.' },
+  starting: { title: 'More Starting Money', description: 'Increase the house-funded first ball: $10 → $50 → $100 → $150 → $250 → $500 → $1,000… with no level cap. New lives end below 10% of their starting money. Purchases take effect next life.' },
 };
 
 function renderSkills(): void {
@@ -319,21 +321,20 @@ function renderSkills(): void {
   }
   const kind = selectedSkill;
   const level = skills?.level(kind) ?? 0;
-  const cost = skills?.cost(kind) ?? (kind === 'starting' ? 1500 : 25);
+  const cost = skills?.cost(kind) ?? (kind === 'starting' ? 500 : 25);
   const maxed = !!skills && level >= skills.maximum(kind, rows);
   el.skillTitle.textContent = skillInfo[kind].title;
   el.skillDescription.textContent = skillInfo[kind].description;
   el.skillLevel.textContent = String(level);
   el.skillBalance.textContent = fmtMoney(run.balance);
   el.skillRemaining.textContent = kind === 'starting'
-    ? `This life's house ball: ${fmtMoney(run.houseStake)}. Next life: ${fmtMoney(skills?.startingDrop ?? 100)}.`
+    ? `This life's house ball: ${fmtMoney(run.houseStake)}. Next life: ${fmtMoney(skills?.startingDrop ?? 10)}.`
     : `${lifeSkills.remaining(kind).length} of ${level} charges remaining this life. Fresh random positions each life; spent charges stay spent until then.`;
   el.skillPriceNote.textContent = kind === 'starting'
-    ? maxed ? 'Maximum starting money reached.' : `Next: ${fmtMoney(STARTING_DROPS[level + 1])} per life. Costs 10× that amount.`
+    ? `Next: ${fmtMoney(startingDropAt(level + 1))} per life. Costs 10× that amount.`
     : 'Each purchase adds one charge now and every future life. Prices: $25, $50, $100…';
   el.buySkill.disabled = !skills?.canBuy(run, rows, kind);
   el.buySkill.textContent = maxed ? 'Maximum on this board' : `Upgrade · ${fmtMoney(cost)}`;
-  if (maxed && kind === 'starting') el.buySkill.textContent = 'Fully upgraded';
   el.skillStatus.textContent = skillMessage || (run.houseDropAvailable
     ? 'Drop the house-funded ball first. Only its winnings can buy upgrades.'
     : run.active ? 'Wait for every ball to land.'

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Matter from 'matter-js';
-import { Board } from '../src/board';
+import { Board, BOUNCY_PEG_KICK } from '../src/board';
 import { GameRun } from '../src/game';
 import { pegIds } from '../src/skills';
 import { DEFAULT_PHYSICS, MAX_ROWS, MIN_ROWS, type PhysicsSettings } from '../src/config';
@@ -12,13 +12,13 @@ const canvas = { getContext: () => ({}) } as unknown as HTMLCanvasElement;
 const state = (board: Board) => board as unknown as {
   engine: Matter.Engine;
   pegs: { id: string; bouncy: boolean; split: boolean }[];
-  balls: { body: Matter.Body; r: number; share: number }[];
+  balls: { body: Matter.Body; r: number; costShare: number }[];
 };
 
-test('a split peg creates two half-value bodies, then stays ordinary', () => seeded(() => {
-  const run = new GameRun('double');
+test('a split peg creates two full-value bodies, then stays ordinary', () => seeded(() => {
+  const run = new GameRun('double', 100);
   const shares: number[] = [];
-  const board = new Board(canvas, { onPegHit() {}, onLand(_k, _tier, id, share) {
+  const board = new Board(canvas, { onPegHit() {}, onDuplicate(id) { run.duplicate(id); }, onLand(_k, _tier, id, share) {
     shares.push(share);
     run.settle(id, 1, share);
   } });
@@ -31,19 +31,20 @@ test('a split peg creates two half-value bodies, then stays ordinary', () => see
   Matter.Body.setVelocity(state(board).balls[0].body, { x: 0, y: 0 });
   for (let i = 0; i < 120 && board.active < 2; i++) board.update(STEP);
   assert.equal(board.active, 2);
-  assert.deepEqual(state(board).balls.map(b => b.share), [.5, .5]);
+  assert.deepEqual(state(board).balls.map(b => b.costShare), [.5, .5]);
   assert.equal(state(board).pegs.find(p => p.id === '0:1')!.split, false);
   for (let i = 0; i < 120 * 31 && board.active; i++) board.update(STEP);
   assert.deepEqual(shares, [.5, .5]);
-  assert.equal(run.balance, 100);
+  assert.equal(run.balance, 200);
   assert.equal(run.active, 0);
 }));
 
-test('stacked effects each fire once per life and every split share settles', () => seeded(() => {
-  const run = new GameRun('double');
+test('stacked effects each fire once per life and every full-value copy settles', () => seeded(() => {
+  const run = new GameRun('double', 100);
   const consumed = new Set<string>();
   let landedShare = 0;
   const board = new Board(canvas, { onPegHit() {},
+    onDuplicate(id) { run.duplicate(id); },
     onChargeUsed(kind, id) {
       const key = kind + id;
       assert.equal(consumed.has(key), false, 'no charge may activate twice');
@@ -65,7 +66,7 @@ test('stacked effects each fire once per life and every split share settles', ()
     if (key.startsWith('bouncy')) assert.ok(consumed.has('split' + key.slice(6)));
   }
   assert.equal(landedShare, 1);
-  assert.equal(run.balance, 100);
+  assert.equal(run.balance, 100 * (1 + consumed.size / 2));
   assert.equal(run.active, 0);
   assert.ok(state(board).pegs.every(p => p.bouncy === p.split));
 }));
@@ -101,7 +102,7 @@ function seeded<T>(fn: () => T): T {
 }
 
 /** A controlled, slightly off-centre impact on the top middle pin. */
-function rebound(bounce: number, changeAfterSpawn?: number, bouncy = false): { height: number; upwardSpeed: number; outwardSpeed: number; tangentSpeed: number } {
+function rebound(bounce: number, changeAfterSpawn?: number, bouncy = false, startX = 380.5): { height: number; upwardSpeed: number; outwardSpeed: number; tangentSpeed: number } {
   let hits = 0;
   const board = new Board(canvas, { onPegHit() { hits++; }, onLand() {} });
   board.setPhysics({ ...DEFAULT_PHYSICS, bounce });
@@ -110,7 +111,7 @@ function rebound(bounce: number, changeAfterSpawn?: number, bouncy = false): { h
   board.drop(0);
   seeded(() => board.update(STEP));
   const ball = state(board).balls[0].body;
-  Matter.Body.setPosition(ball, { x: 380.5, y: 0 });
+  Matter.Body.setPosition(ball, { x: startX, y: 0 });
   Matter.Body.setVelocity(ball, { x: 0, y: 0 });
   if (changeAfterSpawn !== undefined) board.setPhysics({ ...DEFAULT_PHYSICS, bounce: changeAfterSpawn });
   for (let i = 0; i < 120 && hits === 0; i++) board.update(STEP);
@@ -145,14 +146,17 @@ test('changing bounce affects new balls and preserves an existing ball rebound',
   assert.deepEqual(rebound(0.3, 5), rebound(0.3));
 });
 
-test('an upgraded peg quadruples the resolved rebound without changing ordinary pegs', () => {
+test('charged pegs add a fixed tangent kick for both grazing and head-on hits', () => {
   for (const bounce of [0.3, DEFAULT_PHYSICS.bounce, 2]) {
-    const normal = rebound(bounce);
-    const upgraded = rebound(bounce, undefined, true);
-    const cap = Math.min(1, 16 / Math.hypot(normal.outwardSpeed * 4, normal.tangentSpeed));
-    assert.ok(Math.abs(upgraded.outwardSpeed - normal.outwardSpeed * 4 * cap) < 1e-9);
-    assert.ok(Math.abs(upgraded.tangentSpeed - normal.tangentSpeed * cap) < 1e-9);
-    assert.ok(upgraded.height > normal.height);
+    for (const x of [368.8, 380.5, 391.2]) {
+      const normal = rebound(bounce, undefined, false, x);
+      const upgraded = rebound(bounce, undefined, true, x);
+      const tangent = normal.tangentSpeed + BOUNCY_PEG_KICK * Math.sign(normal.tangentSpeed);
+      const cap = Math.min(1, 16 / Math.hypot(normal.outwardSpeed, tangent));
+      assert.ok(Math.abs(upgraded.outwardSpeed - normal.outwardSpeed * cap) < 1e-8);
+      assert.ok(Math.abs(upgraded.tangentSpeed - tangent * cap) < 1e-8);
+      assert.ok(Math.abs(upgraded.tangentSpeed) > 10, 'grazes must still launch visibly');
+    }
   }
 });
 

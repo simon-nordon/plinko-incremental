@@ -3,18 +3,20 @@ import { test } from 'node:test';
 import { fmtChange } from '../src/format';
 import { GameRun } from '../src/game';
 
-function earned(balance = 100): GameRun {
-  const game = new GameRun('double');
-  game.settle(game.drop(0)!.id, balance / 100);
+function earned(balance = 100, starting = 10): GameRun {
+  const game = new GameRun('double', starting);
+  game.settle(game.drop(0)!.id, balance / starting);
   return game;
 }
 
-test('the first ball is house-funded and only settled winnings are spendable', () => {
-  for (const amount of [100, 150, 250, 500]) {
+test('the first ball is house-funded at the chosen starting amount', () => {
+  assert.equal(new GameRun('double').houseStake, 10);
+  for (const amount of [10, 50, 100, 150, 250, 500, 1000, 10000]) {
     const game = new GameRun('double', amount);
     assert.equal(game.balance, 0);
+    assert.equal(game.minimumBet, amount / 10);
     assert.equal(game.busted, false);
-    assert.equal(game.canSpend(25), false);
+    assert.equal(game.canSpend(1), false);
     const bet = game.drop(0)!;
     assert.equal(bet.amount, amount);
     assert.equal(bet.cost, 0);
@@ -25,7 +27,7 @@ test('the first ball is house-funded and only settled winnings are spendable', (
     assert.equal(game.drop(4), null);
     assert.equal(game.settle(bet.id, 1.5)!.profit, amount * 1.5);
     assert.equal(game.balance, amount * 1.5);
-    assert.equal(game.canSpend(25), true);
+    assert.equal(game.canSpend(1), true);
     const next = game.drop(0)!;
     assert.equal(next.amount, amount * 1.5);
     assert.equal(next.cost, next.amount);
@@ -34,68 +36,72 @@ test('the first ball is house-funded and only settled winnings are spendable', (
   }
 });
 
-test('house split proceeds remain unavailable until every child has landed', () => {
+test('house duplicate proceeds remain unavailable until every full-value ball lands', () => {
   const game = new GameRun('double');
   const bet = game.drop(0)!;
+  assert.ok(game.duplicate(bet.id));
+  assert.equal(game.inPlay, 20);
   game.settle(bet.id, 2, .5);
-  assert.equal(game.balance, 100);
-  assert.equal(game.spend(25), false);
+  assert.equal(game.balance, 20);
+  assert.equal(game.spend(5), false);
   assert.equal(game.drop(0), null);
   game.settle(bet.id, 0, .5);
-  assert.equal(game.spend(25), true);
-  assert.equal(game.balance, 75);
+  assert.equal(game.spend(5), true);
+  assert.equal(game.balance, 15);
 });
 
-test('split landings conserve the stake and wait for all children', () => {
+test('duplicates pay full value while the original wager is charged only once', () => {
   const game = earned();
   const bet = game.drop(0)!;
+  game.duplicate(bet.id);
+  game.duplicate(bet.id);
+  assert.equal(game.inPlay, 300);
   const first = game.settle(bet.id, .1, .5)!;
-  assert.equal(first.payout, 5);
+  assert.equal(first.payout, 10);
+  assert.equal(first.profit, -40);
   assert.equal(first.complete, false);
   assert.equal(game.busted, false);
   assert.equal(game.drop(0), null);
-  assert.equal(game.inPlay, 50);
-  assert.equal(game.settle(bet.id, 100, .75), null, 'cannot settle more than the remaining stake');
+  assert.equal(game.inPlay, 200);
+  assert.equal(game.settle(bet.id, 100, 2), null);
   game.settle(bet.id, 2, .25);
   const last = game.settle(bet.id, 0, .25)!;
   assert.equal(last.complete, true);
-  assert.equal(last.totalProfit, -45);
-  assert.equal(game.balance, 55);
+  assert.equal(last.totalProfit, 110);
+  assert.equal(game.balance, 210);
   assert.equal(game.active, 0);
   assert.equal(game.settle(bet.id, 1000, .25), null);
+  assert.equal(game.duplicate(bet.id), false);
 });
 
-test('fractional cents are carried across children without creating money', () => {
+test('fractional cents are accumulated across full-value copies', () => {
   const game = earned(10.01);
   const bet = game.drop(0)!;
-  for (let i = 0; i < 128; i++) game.settle(bet.id, 1, 1 / 128);
-  assert.equal(game.balance, 10.01);
+  for (let i = 1; i < 128; i++) game.duplicate(bet.id);
+  for (let i = 0; i < 128; i++) game.settle(bet.id, .01, 1 / 128);
+  assert.equal(game.balance, 12.81);
   assert.equal(game.active, 0);
 });
 
-test('paid losses show net change, retain cents, and end only below $10', () => {
+test('every life loses strictly below 10% of its starting amount', () => {
+  for (const starting of [10, 50, 100, 150, 250, 500, 2500]) {
+    const game = earned(starting / 10, starting);
+    assert.equal(game.minimumBet, starting / 10);
+    assert.equal(game.busted, false, 'exact threshold is playable');
+    const bet = game.drop(0)!;
+    game.settle(bet.id, (starting / 10 - .01) / bet.amount);
+    assert.equal(game.busted, true, 'one cent below threshold loses');
+    assert.equal(game.drop(0), null);
+    assert.equal(earned(starting * .09, starting).busted, true, 'house ball can bust');
+  }
+});
+
+test('paid losses still show the actual net loss', () => {
   const game = earned();
-  const first = game.drop(0)!;
-  const loss = game.settle(first.id, 0.3)!;
+  const loss = game.settle(game.drop(0)!.id, .3)!;
   assert.equal(loss.payout, 30);
   assert.equal(loss.profit, -70);
   assert.equal(fmtChange(loss.profit), '−$70.00');
-  const second = game.drop(0)!;
-  assert.equal(second.amount, 30);
-  game.settle(second.id, 0.363);
-  assert.equal(game.balance, 10.89);
-  const third = game.drop(0)!;
-  game.settle(third.id, 0.9);
-  assert.equal(game.balance, 9.8);
-  assert.equal(game.busted, true);
-  assert.equal(game.drop(0), null);
-
-  const boundary = earned(10);
-  assert.equal(boundary.busted, false);
-  boundary.settle(boundary.drop(0)!.id, 0.999);
-  assert.equal(boundary.balance, 9.99);
-  assert.equal(boundary.busted, true);
-  assert.equal(earned(9.99).busted, true, 'house drop can also bust');
 });
 
 test('classic bets settle independently and cannot pay twice', () => {

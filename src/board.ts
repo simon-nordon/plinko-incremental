@@ -36,6 +36,8 @@ const AIR_FRICTION: Record<number, number> = {
  * kicks the ball outward by this many px per 1/60 s for each 1.0 above 1.
  */
 const BUMPER_KICK = 1.5;
+/** Fixed tangential impulse for a charged Bouncy Peg, including grazing contacts. */
+export const BOUNCY_PEG_KICK = 12;
 /** Speed limit in Matter's px per 1/60 s; each 120 Hz step travels at most 8 px. */
 const MAX_SPEED = 16;
 const STEP_MS = 1000 / 120;
@@ -61,7 +63,7 @@ interface Ball {
   body: Matter.Body;
   tier: number;
   wagerId: number;
-  share: number;
+  costShare: number;
   /** radius it spawned with; the size slider only affects new balls */
   r: number;
   /** Extra pin impulse captured at spawn, just like restitution and size. */
@@ -83,7 +85,8 @@ interface FloatText {
 
 export interface BoardHooks {
   onPegHit(row: number, tier: number): void;
-  onLand(bucket: number, tier: number, wagerId: number, share: number): void;
+  onLand(bucket: number, tier: number, wagerId: number, costShare: number): void;
+  onDuplicate?(wagerId: number): void;
   onChargeUsed?(kind: 'bouncy' | 'split', pegId: string): void;
 }
 
@@ -266,7 +269,7 @@ export class Board {
     });
     Matter.Composite.add(this.engine.world, body);
     const ball: Ball = {
-      body, tier, wagerId, share: 1, r, steps: 0, trail: [], previous: { ...body.position },
+      body, tier, wagerId, costShare: 1, r, steps: 0, trail: [], previous: { ...body.position },
       bumperKick: BUMPER_KICK * Math.max(0, this.physics.bounce - 1),
     };
     this.balls.push(ball);
@@ -328,17 +331,21 @@ export class Board {
       const dy = ball.body.position.y - peg.body.position.y;
       const d = Math.hypot(dx, dy) || 1;
       const v = ball.body.velocity;
-      // Quadruple the ordinary outward rebound after the solver has resolved impact.
-      // Tangential motion is unchanged; the existing speed cap still bounds energy.
-      const rebound = Math.max(0, (v.x * dx + v.y * dy) / d + ball.bumperKick);
-      const kick = ball.bumperKick + (bouncy ? 3 * rebound : 0);
+      // Choose the tangent aligned with travel; a head-on tie kicks toward that side.
+      // The charged kick is fixed, independent of impact speed and incidence angle.
+      const tx = -dy / d, ty = dx / d;
+      const tangentSpeed = v.x * tx + v.y * ty;
+      const direction = Math.abs(tangentSpeed) > 1e-8 ? Math.sign(tangentSpeed) : (dx < 0 ? -1 : 1);
+      const launch = bouncy ? BOUNCY_PEG_KICK * direction : 0;
       Matter.Body.setVelocity(ball.body, {
-        x: v.x + (dx / d) * kick,
-        y: v.y + (dy / d) * kick,
+        x: v.x + (dx / d) * ball.bumperKick + tx * launch,
+        y: v.y + (dy / d) * ball.bumperKick + ty * launch,
       });
       if (split) {
         // Each peg can split only once per life, naturally bounding the body count.
-        ball.share /= 2;
+        // Only the original paid cost is shared; both balls keep the full wager value.
+        ball.costShare /= 2;
+        this.hooks.onDuplicate?.(ball.wagerId);
         const position = { ...ball.body.position };
         const velocity = { ...ball.body.velocity };
         const body = Matter.Bodies.circle(position.x, position.y, ball.r, {
@@ -368,7 +375,7 @@ export class Board {
 
   private collectLanded(): void {
     for (let i = this.balls.length - 1; i >= 0; i--) {
-      const { body, tier, wagerId, r, steps, share } = this.balls[i];
+      const { body, tier, wagerId, r, steps, costShare } = this.balls[i];
       if (body.position.y + r < H - 5 && steps < MAX_BALL_STEPS) continue;
       const x = body.position.x;
       const k = Math.max(0, Math.min(this.buckets - 1, this.lastRowX.findLastIndex((px) => px < x)));
@@ -376,7 +383,7 @@ export class Board {
       this.balls.splice(i, 1);
       this.ballById.delete(body.id);
       this.bucketAnim[k] = 1;
-      this.hooks.onLand(k, tier, wagerId, share);
+      this.hooks.onLand(k, tier, wagerId, costShare);
     }
   }
 
