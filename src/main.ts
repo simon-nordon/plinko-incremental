@@ -17,6 +17,7 @@ import { fmt, fmtChange, fmtMoney, fmtMult } from './format';
 import { GameRun, startingBalance, type GameMode } from './game';
 import { payoutTable } from './payouts';
 import { affordableTiers, type BallTier } from './tiers';
+import { SkillTree, pegIds } from './skills';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -45,22 +46,37 @@ const el = {
   overDrops: $('overDrops'),
   overPeak: $('overPeak'),
   restart: $<HTMLButtonElement>('restart'),
+  openSkills: $<HTMLButtonElement>('openSkills'),
+  skills: $<HTMLDialogElement>('skills'),
+  closeSkills: $<HTMLButtonElement>('closeSkills'),
+  buyBouncy: $<HTMLButtonElement>('buyBouncy'),
+  skillCount: $('skillCount'),
+  nodeLevel: $('nodeLevel'),
+  pegCount: $('pegCount'),
+  skillBalance: $('skillBalance'),
+  pegCoverage: $('pegCoverage'),
+  skillStatus: $('skillStatus'),
+  overSkills: $('overSkills'),
 };
 
 // Settings are a per-browser convenience; the run itself always starts fresh.
 const PREFS_KEY = 'plinko-prefs';
-function loadPrefs(): { mode: GameMode; risk: Risk; rows: number; muted: boolean; luck: number; physics: PhysicsSettings } {
-  const def = { mode: 'classic' as GameMode, risk: 'medium' as Risk, rows: 16, muted: false, luck: DEFAULT_LUCK, physics: { ...DEFAULT_PHYSICS } };
+function loadPrefs(forMode?: GameMode): { mode: GameMode; risk: Risk; rows: number; muted: boolean; luck: number; physics: PhysicsSettings } {
+  const def = { mode: forMode ?? 'classic' as GameMode, risk: 'medium' as Risk, rows: 16, muted: false, luck: DEFAULT_LUCK, physics: { ...DEFAULT_PHYSICS } };
   try {
-    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}');
-    return { ...def, ...saved, mode: saved.mode === 'double' ? 'double' : 'classic', physics: saved.physicsVersion === PHYSICS_VERSION ? saved.physics : def.physics };
+    const shared = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}');
+    const selected: GameMode = forMode ?? (shared.mode === 'double' ? 'double' : 'classic');
+    const saved = JSON.parse(localStorage.getItem(`${PREFS_KEY}-${selected}`) ?? (forMode ? '{}' : JSON.stringify(shared)));
+    return { ...def, ...saved, mode: selected, muted: shared.muted ?? false, physics: saved.physicsVersion === PHYSICS_VERSION ? saved.physics : def.physics };
   } catch {
     return def;
   }
 }
 function savePrefs(): void {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ mode, risk, rows, muted: sfx.muted, luck, physics, physicsVersion: PHYSICS_VERSION }));
+    const prefs = JSON.stringify({ mode, risk, rows, muted: sfx.muted, luck, physics, physicsVersion: PHYSICS_VERSION });
+    localStorage.setItem(`${PREFS_KEY}-${mode}`, prefs);
+    localStorage.setItem(PREFS_KEY, prefs);
   } catch {
     /* storage unavailable */
   }
@@ -76,6 +92,18 @@ let overTimer = 0;
 let denyTimer = 0;
 let resetArmed = 0;
 let visibleTiers: BallTier[] = [];
+let skills: SkillTree | null = null;
+let skillMessage = '';
+function loadSkills(): void {
+  try {
+    skills = new SkillTree(mode, localStorage);
+    skillMessage = '';
+  } catch {
+    skills = null;
+    skillMessage = 'Could not load saved upgrades. Purchases are unavailable; your save has been left untouched.';
+  }
+}
+loadSkills();
 
 const board = new Board($<HTMLCanvasElement>('board'), {
   onPegHit: (row, tier) => sfx.peg(row, 'normal', tier),
@@ -85,6 +113,7 @@ board.setPhysics(physics);
 
 function applyLayout(): void {
   board.setLayout(rows, []);
+  board.setBouncyPegs(skills?.bouncyPegs ?? []);
   applyLuck();
 }
 
@@ -131,6 +160,7 @@ el.resetPhysics.addEventListener('click', () => {
 function drop(tier: number): boolean {
   const wager = run.drop(tier);
   if (!wager) return false;
+  if (skills) skillMessage = '';
   sfx.unlock();
   board.drop(wager.tier, wager.id);
   sfx.drop();
@@ -183,6 +213,7 @@ function bust(): void {
 }
 
 function restart(): void {
+  if (skills) skillMessage = '';
   window.clearTimeout(overTimer);
   window.clearTimeout(denyTimer);
   window.clearTimeout(resetArmed);
@@ -245,15 +276,66 @@ function render(): void {
   el.allInAmount.textContent = fmtMoney(run.active > 0 ? run.inPlay : balance);
   el.reset.title = `Start over from ${fmtMoney(startingBalance(mode))}`;
   el.mute.textContent = sfx.muted ? '🔇' : '🔊';
+  renderSkills();
+}
+
+function renderSkills(): void {
+  el.openSkills.hidden = el.overSkills.hidden = mode !== 'double';
+  const level = skills?.level ?? 0;
+  const available = skills?.available(rows).length ?? 0;
+  const active = pegIds(rows).length - available;
+  el.skillCount.textContent = `${level} owned`;
+  el.nodeLevel.textContent = `Level ${level}`;
+  el.pegCount.textContent = String(level);
+  el.skillBalance.textContent = fmtMoney(run.balance);
+  el.pegCoverage.textContent = skills ? `${active} of ${pegIds(rows).length} pegs upgraded on this board.`
+    + (level > active ? ` ${level - active} on hidden rows will return when you add those rows back.` : '') : '';
+  el.buyBouncy.disabled = !skills?.canBuy(run, rows);
+  el.buyBouncy.textContent = available === 0 && skills ? 'All visible pegs upgraded' : `Upgrade · ${fmtMoney(skills?.cost ?? 50)}`;
+  el.skillStatus.textContent = skillMessage || (run.active > 0 ? 'Wait for your ball to land.'
+    : run.busted ? 'Start a new run to earn more money.'
+    : available === 0 ? (rows < MAX_ROWS ? 'Add more rows to upgrade more pegs.' : 'Every peg is permanently upgraded.')
+    : run.balance < (skills?.cost ?? 50) ? `Need ${fmtMoney((skills?.cost ?? 50) - run.balance)} more.`
+    : run.balance - (skills?.cost ?? 50) < run.minimumBet ? 'Buying this ends your run. The upgrade is kept.' : 'Paid from your current balance.');
 }
 
 // ---- wiring ----
 
 el.gameMode.addEventListener('change', () => {
   if (run.active > 0) { render(); return; }
+  savePrefs();
   mode = el.gameMode.checked ? 'double' : 'classic';
+  ({ risk, rows, luck, physics } = loadPrefs(mode));
+  el.risk.value = risk;
+  el.rows.value = String(rows);
+  el.luck.value = String(luck);
+  board.setPhysics(physics);
+  renderPhysics();
+  loadSkills();
   restart();
   savePrefs();
+});
+el.openSkills.addEventListener('click', () => {
+  if (mode !== 'double') return;
+  if (skills) skillMessage = '';
+  renderSkills();
+  el.skills.showModal();
+});
+el.closeSkills.addEventListener('click', () => el.skills.close());
+el.buyBouncy.addEventListener('click', () => {
+  try {
+    const id = skills?.buy(run, rows);
+    if (!id) return;
+    board.setBouncyPegs(skills!.bouncyPegs);
+    sfx.unlock();
+    sfx.buy();
+    const [row, column] = id.split(':').map(Number);
+    skillMessage = `Peg upgraded: row ${row + 1}, peg ${column + 1}. Permanently saved.`;
+    if (run.busted) { el.skills.close(); bust(); }
+  } catch {
+    skillMessage = 'Could not save the upgrade. No money was spent. Please try again.';
+  }
+  render();
 });
 el.allIn.addEventListener('click', () => pressTier(0));
 
@@ -303,6 +385,7 @@ el.mute.addEventListener('click', () => {
 });
 // Space drops the cheapest visible ball; 1–5 map to the current five buttons.
 window.addEventListener('keydown', (e) => {
+  if (el.skills.open) return;
   if (e.target instanceof HTMLSelectElement || e.target instanceof HTMLInputElement || e.target instanceof HTMLButtonElement) return;
   const slot = e.code === 'Space' ? 0 : /^Digit[1-5]$/.test(e.code) ? Number(e.code.slice(5)) - 1 : -1;
   if (slot < 0 && e.code !== 'Enter') return;

@@ -23,11 +23,12 @@ function seeded<T>(fn: () => T): T {
 }
 
 /** A controlled, slightly off-centre impact on the top middle pin. */
-function rebound(bounce: number, changeAfterSpawn?: number): { height: number; upwardSpeed: number } {
+function rebound(bounce: number, changeAfterSpawn?: number, bouncy = false): { height: number; upwardSpeed: number; outwardSpeed: number; tangentSpeed: number } {
   let hits = 0;
   const board = new Board(canvas, { onPegHit() { hits++; }, onLand() {} });
   board.setPhysics({ ...DEFAULT_PHYSICS, bounce });
   board.setLayout(16, []);
+  board.setBouncyPegs(bouncy ? ['0:1'] : []);
   board.drop(0);
   seeded(() => board.update(STEP));
   const ball = state(board).balls[0].body;
@@ -38,12 +39,17 @@ function rebound(bounce: number, changeAfterSpawn?: number): { height: number; u
   assert.ok(hits > 0, 'ball must strike the pin');
   const impactY = ball.position.y;
   const upwardSpeed = -ball.velocity.y;
+  const dx = ball.position.x - 380;
+  const dy = ball.position.y - 36;
+  const distance = Math.hypot(dx, dy);
+  const outwardSpeed = (ball.velocity.x * dx + ball.velocity.y * dy) / distance;
+  const tangentSpeed = (ball.velocity.x * -dy + ball.velocity.y * dx) / distance;
   let minY = impactY;
   for (let i = 0; i < 120 && ball.velocity.y < 0; i++) {
     board.update(STEP);
     minY = Math.min(minY, ball.position.y);
   }
-  return { height: impactY - minY, upwardSpeed };
+  return { height: impactY - minY, upwardSpeed, outwardSpeed, tangentSpeed };
 }
 
 test('default ball visibly rebounds upward; bounce slider increases rebound', () => {
@@ -59,6 +65,17 @@ test('default ball visibly rebounds upward; bounce slider increases rebound', ()
 test('changing bounce affects new balls and preserves an existing ball rebound', () => {
   assert.deepEqual(rebound(2, 0.3), rebound(2));
   assert.deepEqual(rebound(0.3, 5), rebound(0.3));
+});
+
+test('an upgraded peg doubles the resolved rebound without changing ordinary pegs', () => {
+  for (const bounce of [0.3, DEFAULT_PHYSICS.bounce, 2]) {
+    const normal = rebound(bounce);
+    const upgraded = rebound(bounce, undefined, true);
+    assert.ok(Math.abs(upgraded.outwardSpeed / normal.outwardSpeed - 2) < 1e-9,
+      `expected 2× outward rebound at ${bounce}, got ${upgraded.outwardSpeed / normal.outwardSpeed}`);
+    assert.ok(Math.abs(upgraded.tangentSpeed - normal.tangentSpeed) < 1e-9);
+    assert.ok(upgraded.height > normal.height);
+  }
 });
 
 test('balls spawn clear of the chute walls at either edge for every ball size', () => {

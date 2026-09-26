@@ -30,6 +30,7 @@
           <span id="allInAmount" class="all-in-amount">$100.00</span>
         </button>
         <p id="allInRules" class="mode-note" hidden>Start with $100. One ball at a time. Below $10 ends the game.</p>
+        <button id="openSkills" class="skills-button" hidden><span class="peg-symbol" aria-hidden="true">↟</span><span>Skill tree</span><span id="skillCount" class="skill-count">0 owned</span></button>
 
         <div class="board-settings">
           <label class="field">
@@ -99,9 +100,38 @@
             <div><span>Best balance</span><strong id="overPeak"></strong></div>
           </div>
           <button id="restart" class="drop">Play Again</button>
+          <p id="overSkills" class="mode-note" hidden>Your permanent upgrades are kept.</p>
         </div>
       </div>
     </div>
+    <dialog id="skills" class="skills-dialog" aria-labelledby="skillsTitle">
+      <header class="skills-heading">
+        <div><p class="eyebrow">Double or Nothing</p><h2 id="skillsTitle">Skill tree</h2></div>
+        <button id="closeSkills" class="close-skills" aria-label="Close skill tree" autofocus>×</button>
+      </header>
+      <p class="skills-intro">Spend your balance. Keep your upgrades, even when you lose.</p>
+      <div class="skills-body">
+        <div class="skill-map" aria-label="Double or Nothing skill tree">
+          <div class="tree-root">DOUBLE OR NOTHING</div>
+          <div class="tree-branch"></div>
+          <div class="skill-node"><span class="peg-symbol" aria-hidden="true">↟</span><strong>Bouncy Peg</strong><span id="nodeLevel">Level 0</span></div>
+          <span class="permanent-tag">Permanent upgrade</span>
+        </div>
+        <section class="skill-detail" aria-labelledby="bouncyTitle">
+          <p class="eyebrow">Board upgrade</p>
+          <h3 id="bouncyTitle">Bouncy Peg</h3>
+          <p>Turn one random ordinary peg purple. Balls rebound off it with <strong>2× the normal bounce</strong>.</p>
+          <div class="skill-stats"><div><span>Upgraded pegs</span><strong id="pegCount">0</strong></div><div><span>Your balance</span><strong id="skillBalance">$100</strong></div></div>
+          <p id="pegCoverage" class="mode-note"></p>
+          <div class="skill-buy-area">
+            <p class="mode-note">Each purchase upgrades another peg. Cost doubles each time.</p>
+            <button id="buyBouncy" class="buy-skill">Upgrade · $50</button>
+            <p id="skillStatus" class="mode-note" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+      </div>
+      <p class="skills-save-note">Progress is saved in this browser, separately from Normal mode.</p>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -28,6 +28,16 @@ export class GameRun {
   get busted(): boolean { return this.balance < this.minimumBet && this.active === 0; }
   get inPlay(): number { return [...this.wagers.values()].reduce((sum, bet) => sum + bet.amount, 0); }
 
+  canSpend(amount: number): boolean {
+    return !this.busted && this.active === 0 && Number.isFinite(amount) && amount > 0 && amount <= this.balance;
+  }
+
+  spend(amount: number): boolean {
+    if (!this.canSpend(amount)) return false;
+    this.balance = cents(this.balance - amount);
+    return true;
+  }
+
   drop(tier: number): Wager | null {
     if (this.busted || (this.mode === 'double' && this.active > 0)) return null;
     const tierIndex = this.mode === 'double' ? 0 : tier;

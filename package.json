@@ -7,7 +7,7 @@
     "dev": "vite --open",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "esbuild scripts/physics.test.ts scripts/payouts.test.ts scripts/distribution.test.ts scripts/game.test.ts scripts/tiers.test.ts --bundle --platform=node --outdir=node_modules/.cache/tests --out-extension:.js=.cjs --log-level=warning && node node_modules/.cache/tests/physics.test.cjs && node node_modules/.cache/tests/payouts.test.cjs && node node_modules/.cache/tests/distribution.test.cjs && node node_modules/.cache/tests/game.test.cjs && node node_modules/.cache/tests/tiers.test.cjs"
+    "test": "esbuild scripts/physics.test.ts scripts/payouts.test.ts scripts/distribution.test.ts scripts/game.test.ts scripts/tiers.test.ts scripts/skills.test.ts --bundle --platform=node --outdir=node_modules/.cache/tests --out-extension:.js=.cjs --log-level=warning && node node_modules/.cache/tests/physics.test.cjs && node node_modules/.cache/tests/payouts.test.cjs && node node_modules/.cache/tests/distribution.test.cjs && node node_modules/.cache/tests/game.test.cjs && node node_modules/.cache/tests/tiers.test.cjs && node node_modules/.cache/tests/skills.test.cjs"
   },
   "devDependencies": {
     "@types/matter-js": "^0.20.2",

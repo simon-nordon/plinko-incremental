@@ -50,6 +50,8 @@ const BALL = 0x2;
 
 interface Peg {
   body: Matter.Body;
+  id: string;
+  bouncy: boolean;
   row: number;
   flash: number;
 }
@@ -123,7 +125,7 @@ export class Board {
         peg.flash = 1;
         // collisionStart fires BEFORE Matter resolves velocity. Apply bumper impulses
         // after Engine.update so the solver cannot absorb or reverse the extra bounce.
-        if (ball.bumperKick > 0) this.pinContacts.push({ ball, peg });
+        if (ball.bumperKick > 0 || peg.bouncy) this.pinContacts.push({ ball, peg });
         this.hooks.onPegHit(peg.row, ball.tier);
       }
     });
@@ -185,7 +187,7 @@ export class Board {
           isStatic: true,
           collisionFilter: { category: PIN, mask: BALL },
         });
-        const peg = { body, row: r, flash: 0 };
+        const peg = { body, id: `${r}:${j}`, bouncy: false, row: r, flash: 0 };
         this.pegs.push(peg);
         this.pegById.set(body.id, peg);
         if (r === rows - 1) this.lastRowX.push(x);
@@ -214,6 +216,11 @@ export class Board {
   /** Swap the payout table without disturbing balls in play. */
   setMults(mults: number[]): void {
     this.mults = mults;
+  }
+
+  setBouncyPegs(ids: readonly string[]): void {
+    const upgraded = new Set(ids);
+    for (const peg of this.pegs) peg.bouncy = upgraded.has(peg.id);
   }
 
   drop(tier: number, wagerId = 0): void {
@@ -301,9 +308,13 @@ export class Board {
       const dy = ball.body.position.y - peg.body.position.y;
       const d = Math.hypot(dx, dy) || 1;
       const v = ball.body.velocity;
+      // Double the ordinary outward rebound after the solver has resolved impact.
+      // Tangential motion is unchanged; the existing speed cap still bounds energy.
+      const rebound = Math.max(0, (v.x * dx + v.y * dy) / d + ball.bumperKick);
+      const kick = ball.bumperKick + (peg.bouncy ? rebound : 0);
       Matter.Body.setVelocity(ball.body, {
-        x: v.x + (dx / d) * ball.bumperKick,
-        y: v.y + (dy / d) * ball.bumperKick,
+        x: v.x + (dx / d) * kick,
+        y: v.y + (dy / d) * kick,
       });
     }
     this.pinContacts.length = 0;
@@ -407,7 +418,14 @@ export class Board {
         ctx.arc(px, py, pinR * (1.8 + 1.5 * (1 - p.flash)) * s, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.fillStyle = '#ffffff';
+      if (p.bouncy) {
+        ctx.strokeStyle = '#b593ff';
+        ctx.lineWidth = Math.max(1, s);
+        ctx.beginPath();
+        ctx.arc(px, py, pinR * 1.7 * s, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = p.bouncy ? '#b593ff' : '#ffffff';
       ctx.beginPath();
       ctx.arc(px, py, pinR * s, 0, Math.PI * 2);
       ctx.fill();
