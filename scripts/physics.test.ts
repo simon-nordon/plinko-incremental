@@ -11,10 +11,11 @@ const canvas = { getContext: () => ({}) } as unknown as HTMLCanvasElement;
 // Inspect physical state without adding a test-only interface to the game.
 const state = (board: Board) => board as unknown as {
   engine: Matter.Engine;
-  balls: { body: Matter.Body; r: number; share: number; splitPegs: Set<string> }[];
+  pegs: { id: string; bouncy: boolean; split: boolean }[];
+  balls: { body: Matter.Body; r: number; share: number }[];
 };
 
-test('duplicate impacts create two half-value bodies and settle one conserved wager', () => seeded(() => {
+test('a split peg creates two half-value bodies, then stays ordinary', () => seeded(() => {
   const run = new GameRun('double');
   const shares: number[] = [];
   const board = new Board(canvas, { onPegHit() {}, onLand(_k, _tier, id, share) {
@@ -22,7 +23,7 @@ test('duplicate impacts create two half-value bodies and settle one conserved wa
     run.settle(id, 1, share);
   } });
   board.setLayout(16, []);
-  board.setSpecialPegs([], ['0:1']);
+  board.setPegCharges([], ['0:1']);
   const wager = run.drop(0)!;
   board.drop(0, wager.id);
   board.update(STEP);
@@ -31,38 +32,62 @@ test('duplicate impacts create two half-value bodies and settle one conserved wa
   for (let i = 0; i < 120 && board.active < 2; i++) board.update(STEP);
   assert.equal(board.active, 2);
   assert.deepEqual(state(board).balls.map(b => b.share), [.5, .5]);
-  assert.ok(state(board).balls.every(b => b.splitPegs.has('0:1')));
+  assert.equal(state(board).pegs.find(p => p.id === '0:1')!.split, false);
   for (let i = 0; i < 120 * 31 && board.active; i++) board.update(STEP);
   assert.deepEqual(shares, [.5, .5]);
   assert.equal(run.balance, 100);
   assert.equal(run.active, 0);
 }));
 
-test('lucky collision callbacks use child values and finish safely on a mixed board', () => seeded(() => {
+test('stacked effects each fire once per life and every split share settles', () => seeded(() => {
   const run = new GameRun('double');
-  let awarded = 0;
-  let hits = 0;
+  const consumed = new Set<string>();
   let landedShare = 0;
-  const board = new Board(canvas, { onPegHit() {}, onLuckyHit(id, share) {
-    hits++;
-    const amount = run.luckyHit(id, share);
-    awarded += amount;
-    assert.equal(run.payoutBalance, 100);
-    return amount;
-  }, onLand(_k, _tier, id, share) { landedShare += share; run.settle(id, 1, share); } });
+  const board = new Board(canvas, { onPegHit() {},
+    onChargeUsed(kind, id) {
+      const key = kind + id;
+      assert.equal(consumed.has(key), false, 'no charge may activate twice');
+      consumed.add(key);
+    },
+    onLand(_k, _tier, id, share) { landedShare += share; run.settle(id, 1, share); }
+  });
   board.setLayout(8, []);
   const ids = pegIds(8);
-  board.setSpecialPegs(ids.filter((_, i) => i % 2 === 0), ids.filter((_, i) => i % 2 === 1));
+  board.setPegCharges(ids, ids);
   const wager = run.drop(0)!;
   board.drop(0, wager.id);
   for (let i = 0; i < 120 * 31 && board.active; i++) {
     board.update(STEP);
-    assert.ok(board.active <= 256);
+    assert.ok(board.active <= ids.length + 1);
   }
-  assert.ok(hits > 0);
+  assert.ok(consumed.size > 0);
+  for (const key of consumed) {
+    if (key.startsWith('bouncy')) assert.ok(consumed.has('split' + key.slice(6)));
+  }
   assert.equal(landedShare, 1);
-  assert.equal(run.balance, Math.round((100 + awarded) * 100) / 100);
+  assert.equal(run.balance, 100);
   assert.equal(run.active, 0);
+  assert.ok(state(board).pegs.every(p => p.bouncy === p.split));
+}));
+
+test('a spent stacked peg has no effect on a later ball in the same life', () => seeded(() => {
+  const used: string[] = [];
+  const board = new Board(canvas, { onPegHit() {}, onLand() {}, onChargeUsed(kind) { used.push(kind); } });
+  board.setLayout(16, []);
+  board.setPegCharges(['0:1'], ['0:1']);
+  for (let drop = 0; drop < 2; drop++) {
+    board.drop(0, drop);
+    board.update(STEP);
+    Matter.Body.setPosition(state(board).balls[0].body, { x: 380.5, y: 0 });
+    Matter.Body.setVelocity(state(board).balls[0].body, { x: 0, y: 0 });
+    let maxBodies = board.active;
+    for (let i = 0; i < 120 * 31 && board.active; i++) {
+      board.update(STEP);
+      maxBodies = Math.max(maxBodies, board.active);
+    }
+    assert.equal(maxBodies, drop === 0 ? 2 : 1);
+  }
+  assert.deepEqual(used, ['bouncy', 'split']);
 }));
 
 function seeded<T>(fn: () => T): T {
@@ -81,7 +106,7 @@ function rebound(bounce: number, changeAfterSpawn?: number, bouncy = false): { h
   const board = new Board(canvas, { onPegHit() { hits++; }, onLand() {} });
   board.setPhysics({ ...DEFAULT_PHYSICS, bounce });
   board.setLayout(16, []);
-  board.setBouncyPegs(bouncy ? ['0:1'] : []);
+  board.setPegCharges(bouncy ? ['0:1'] : [], []);
   board.drop(0);
   seeded(() => board.update(STEP));
   const ball = state(board).balls[0].body;

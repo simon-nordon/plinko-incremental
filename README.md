@@ -5,16 +5,19 @@
 A browser-based Plinko game built with TypeScript, Vite, and Matter.js.
 
 - **Normal:** start with $5, drop balls from $1, and unlock larger stakes as your balance grows.
-- **Double or Nothing:** start with $100 and wager your entire balance on one drop. Wait for all split children to land before dropping again. A balance below $10 ends the run once all balls settle.
-- **Permanent skills:** Double or Nothing has its own skill tree. Bouncy Peg turns a random peg purple with four times the normal rebound, subject to the simulation's speed limit. It costs $50 initially and doubles in price with each purchase.
-- **Bucket Return:** permanently improves every Double or Nothing bucket by 5% per level (+5%, +10%, +15%…). This bonus multiplies the Luck-adjusted payouts. Its separate cost starts at $50 and doubles per purchase.
-- **Pity:** every level adds another 5% to returns when your original balance before the drop is below $100 (+5%, +10%, +15%…). Costs start at $50 and double. Existing one-time unlocks become level one. Eligibility stays fixed for the entire drop, including split children and Lucky Peg rewards.
-- **Lucky Peg:** turns a random ordinary peg gold. Each collision immediately awards 10% of that ball's current value, without reducing its stake. Split children earn rewards on their own half/quarter/etc. value.
-- **Duplicate Peg:** turns a random ordinary peg blue. Each hit creates two balls worth half the hitting ball's value. Children can split on other duplicate pegs; the same peg cannot split the same lineage again. The board allows at most 256 simultaneous balls to keep mobile play responsive.
+- **Double or Nothing:** the first $100 ball each life is on the house. Your spendable balance starts at $0; only the proceeds can buy upgrades. Subsequent drops wager your entire balance. Wait for all split children to land before dropping or buying again. Below $10 ends the life after all balls settle.
+- **Bouncy Peg:** adds one randomly placed purple peg per life. Its first hit gives 4× the normal rebound, subject to the speed limit, then it becomes ordinary.
+- **Split Peg:** adds one randomly placed blue peg per life. Its first hit creates two half-value balls, then it becomes ordinary. Bouncy and Split can occupy the same peg and both activate on that hit.
+- **Lucky Bucket:** adds one randomly placed gold bucket per life. The first ball pays the next whole multiplier (0.4× → 1×, 0.7× → 1×, 1.2× → 2×, 2× → 3×), then the bucket returns to its base payout. Only one split child can consume its charge.
+- **More Starting Money:** upgrades future house balls from $100 → $150 → $250 → $500. Prices are ten times the new starting amount: $1,500, $2,500, and $5,000. Applies next life and never grants spendable cash directly.
 
-Lucky and Duplicate upgrades each start at $50 and double independently. Peg types occupy different pegs. The history reports the net result of the entire drop, including all children and Lucky Peg rewards. Fractional cents are accumulated before rounding to avoid creating money through splits.
+Bouncy Peg, Split Peg, and Lucky Bucket each cost $25 initially, then $50, $100, $200… independently. Purchases add one new charge immediately; spent charges stay spent. Unlock counts survive death, and every new life refills charges at fresh random positions. Rows lock after the first drop; changing risk preserves assignments and spent charges.
 
-Upgrades survive losing and restarting. Progress is stored in your browser for the current site address; localhost, Cloudflare tunnels, and GitHub Pages have separate saves.
+Double or Nothing uses the reference payout tables without percentage bonuses. The old Bucket Return, Pity, and Lucky Peg skills have been removed. This ruleset starts a fresh skill save; the previous experimental save is left untouched. Normal mode keeps its own settings and Luck control.
+
+History reports the net result of the entire drop, including all children. The house ball costs you nothing, so its proceeds are a net gain. Paid drops show actual profit or loss. Fractional cents accumulate before rounding to prevent splits creating money.
+
+Progress is stored in your browser for the current site address; localhost, Cloudflare tunnels, and GitHub Pages have separate saves.
 
 ## Local development
 

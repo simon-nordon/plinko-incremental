@@ -1,272 +1,190 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { GameRun } from '../src/game';
-import { SkillTree, pegIds } from '../src/skills';
+import { SkillTree, LifeSkills, SKILLS, CHARGES, pegIds, luckyBucketReturn } from '../src/skills';
 import { payoutTable } from '../src/payouts';
 
 function memoryStorage() {
   const items = new Map<string, string>();
   return { getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => { items.set(key, value); } };
 }
+function earned(balance = 1000): GameRun {
+  const run = new GameRun('double');
+  run.settle(run.drop(0)!.id, balance / 100);
+  return run;
+}
 
-test('Pity uses the pre-drop balance: below $100 qualifies, exactly $100 and above do not', () => {
+test('charge prices are halved, grow independently, and spend earned money', () => {
   const tree = new SkillTree('double', memoryStorage());
-  assert.equal(tree.pityActive(50), false);
-  assert.ok(tree.buyPity(new GameRun('double')));
-  for (const [balance, expected] of [[99.99, 1.05], [100, 1], [100.01, 1], [10, 1.05]]) {
-    const run = new GameRun('double');
-    run.balance = balance;
-    const before = tree.improvePayouts([.1, 1, 110], run.balance);
-    const bet = run.drop(0)!;
-    assert.equal(run.balance, 0);
-    const during = tree.improvePayouts([.1, 1, 110], run.balance + run.inPlay);
-    assert.deepEqual(during, before);
-    assert.deepEqual(during, [.1, 1, 110].map(n => n * expected));
-    const result = run.settle(bet.id, during[1])!;
-    assert.equal(result.payout, Math.round(balance * expected * 100) / 100);
+  const run = earned(10000);
+  for (const kind of CHARGES) {
+    for (const cost of [25, 50, 100, 200]) {
+      assert.equal(tree.cost(kind), cost);
+      const before = run.balance;
+      assert.ok(tree.buy(run, 8, kind));
+      assert.equal(run.balance, before - cost);
+    }
+    assert.equal(tree.level(kind), 4);
   }
 });
 
-test('Pity stacks with other bonuses and follows balance changes between drops', () => {
-  const tree = new SkillTree('double', memoryStorage());
-  const run = new GameRun('double');
-  run.balance = 200;
-  tree.buyReturn(run);
-  tree.buyPity(run);
-  assert.equal(run.balance, 100);
-  assert.equal(tree.pityActive(run.balance), false);
-  const bet = run.drop(0)!;
-  run.settle(bet.id, .5);
-  assert.equal(tree.pityActive(run.balance), true);
-  const base = payoutTable('medium', 16, 10);
-  assert.deepEqual(tree.improvePayouts(base, run.balance), base.map(n => n * 1.05 * 1.05));
-  const next = run.drop(0)!;
-  run.settle(next.id, 3);
-  assert.equal(tree.pityActive(run.balance), false);
-});
-
-test('Pity levels survive death and reload alongside older skills', () => {
+test('house money, in-flight proceeds, insufficient cash and Normal mode cannot buy upgrades', () => {
   const storage = memoryStorage();
-  storage.setItem('plinko-skills-double-v1', JSON.stringify({ version: 1, bouncyPegs: ['0:1'], returnLevel: 2 }));
   const tree = new SkillTree('double', storage);
-  assert.equal(tree.hasPity, false);
   const run = new GameRun('double');
-  run.balance = 50;
-  assert.ok(tree.buyPity(run));
-  assert.equal(run.busted, true);
-  const restored = new SkillTree('double', storage);
-  assert.equal(restored.hasPity, true);
-  assert.equal(restored.returnLevel, 2);
-  assert.deepEqual(restored.bouncyPegs, ['0:1']);
-  const fresh = new GameRun('double');
-  assert.equal(restored.buyPity(fresh), true);
-  assert.equal(fresh.balance, 0);
-  assert.equal(restored.pityLevel, 2);
-  fresh.balance = 100;
-  restored.buy(fresh, 8);
-  assert.equal(new SkillTree('double', storage).hasPity, true);
+  for (const kind of SKILLS) assert.equal(tree.buy(run, 8, kind), false);
+  const bet = run.drop(0)!;
+  run.settle(bet.id, 10, .5);
+  for (const kind of SKILLS) assert.equal(tree.buy(run, 8, kind), false);
+  run.settle(bet.id, 0, .5);
+  assert.ok(tree.buy(run, 8, 'bouncy'));
   const classic = new SkillTree('classic', storage);
-  assert.equal(classic.buyPity(new GameRun('double')), false);
-  assert.deepEqual(classic.improvePayouts([1, 2], 50), [1, 2]);
-  assert.equal(tree.buyPity(new GameRun('classic')), false);
-});
-
-test('legacy Pity unlock becomes level one and repeated purchases add five percentage points', () => {
-  const storage = memoryStorage();
-  storage.setItem('plinko-skills-double-v1', JSON.stringify({ version: 1, bouncyPegs: [], pity: true }));
-  const tree = new SkillTree('double', storage);
-  assert.equal(tree.pityLevel, 1);
-  const run = new GameRun('double');
-  run.balance = 1000;
-  for (const level of [2, 3, 4]) {
-    assert.equal(tree.pityCost, 50 * 2 ** (level - 1));
-    assert.ok(tree.buyPity(run));
-    assert.deepEqual(tree.improvePayouts([1, 2], 99), [1, 2].map(n => n * (1 + level * .05)));
-    assert.deepEqual(tree.improvePayouts([1, 2], 100), [1, 2]);
+  for (const kind of SKILLS) {
+    assert.equal(tree.buy(earned(20), 8, kind), false);
+    assert.equal(tree.buy(new GameRun('classic'), 8, kind), false);
+    assert.equal(classic.buy(earned(), 8, kind), false);
+    assert.equal(classic.level(kind), 0);
   }
-  assert.equal(new SkillTree('double', storage).pityLevel, 4);
+  assert.deepEqual(new LifeSkills(8, classic).payouts([.4, .7, 1.2]), [.4, .7, 1.2]);
 });
 
-test('peg types select unique ordinary pegs with separate costs and persistent saves', () => {
+test('permanent counts survive death and fresh lives randomize positions with overlapping types', () => {
   const storage = memoryStorage();
   const tree = new SkillTree('double', storage);
-  const run = new GameRun('double');
-  run.balance = 1000;
-  tree.buy(run, 8, () => 0);
-  for (const kind of ['lucky', 'duplicate'] as const) {
-    assert.equal(tree.pegCost(kind), 50);
-    assert.ok(tree.buyPeg(run, 8, kind, () => 0));
-    assert.equal(tree.pegCost(kind), 100);
-    assert.ok(tree.buyPeg(run, 8, kind, () => 0));
-  }
-  assert.equal(run.balance, 650);
-  const restored = new SkillTree('double', storage);
-  assert.equal(new Set([...restored.bouncyPegs, ...restored.luckyPegs, ...restored.duplicatePegs]).size, 5);
-  assert.equal(restored.available(8).length, pegIds(8).length - 5);
-  assert.equal(new SkillTree('classic', storage).luckyPegs.length, 0);
-  assert.equal(new SkillTree('classic', storage).duplicatePegs.length, 0);
-  for (const kind of ['lucky', 'duplicate'] as const) {
-    assert.equal(restored.buyPeg(new GameRun('classic'), 8, kind), null);
-    const poor = new GameRun('double');
-    assert.equal(restored.buyPeg(poor, 8, kind), null);
-    const busy = new GameRun('double');
-    busy.drop(0);
-    assert.equal(restored.buyPeg(busy, 8, kind), null);
-    const broken = new SkillTree('double', { getItem: () => null, setItem() { throw new Error('quota'); } });
-    const fresh = new GameRun('double');
-    assert.throws(() => broken.buyPeg(fresh, 8, kind));
-    assert.equal(fresh.balance, 100);
-  }
-});
-
-test('Pity purchase fails safely when in flight, unaffordable or unable to save', () => {
-  const tree = new SkillTree('double', memoryStorage());
-  const run = new GameRun('double');
-  const bet = run.drop(0)!;
-  assert.equal(tree.buyPity(run), false);
-  run.settle(bet.id, .2);
-  assert.equal(tree.buyPity(run), false);
-  assert.equal(run.balance, 20);
-  const broken = new SkillTree('double', { getItem: () => null, setItem() { throw new Error('quota'); } });
-  const fresh = new GameRun('double');
-  assert.throws(() => broken.buyPity(fresh));
-  assert.equal(fresh.balance, 100);
-  assert.equal(broken.hasPity, false);
-});
-
-test('Bucket Return adds 5% per level, stacks with Luck and pays the displayed return', () => {
-  const tree = new SkillTree('double', memoryStorage());
-  const run = new GameRun('double');
-  run.balance = 1000;
-  for (let level = 1; level <= 3; level++) {
-    const cost = 50 * 2 ** (level - 1);
-    const before = run.balance;
-    assert.equal(tree.returnCost, cost);
-    assert.equal(tree.buyReturn(run), true);
-    assert.equal(run.balance, before - cost);
-    assert.equal(tree.returnLevel, level);
-    assert.equal(tree.returnMultiplier, 1 + level * .05);
-    for (const risk of ['low', 'medium', 'high'] as const) {
-      for (const rows of [8, 16]) {
-        const base = payoutTable(risk, rows, 10);
-        assert.deepEqual(tree.improvePayouts(base), base.map(n => n * (1 + level * .05)));
-      }
+  const run = earned();
+  for (const kind of CHARGES) for (let i = 0; i < 3; i++) tree.buy(run, 8, kind);
+  const life = new LifeSkills(8, tree, () => 0);
+  assert.deepEqual(life.remaining('bouncy'), ['0:0', '0:1', '0:2']);
+  assert.deepEqual(life.remaining('split'), life.remaining('bouncy'));
+  for (const kind of CHARGES) {
+    assert.equal(new Set(life.remaining(kind)).size, 3);
+    for (const id of life.remaining(kind)) {
+      assert.equal(life.consume(kind, id), true);
+      assert.equal(life.consume(kind, id), false);
     }
   }
-  const wager = run.drop(0)!;
-  const multiplier = tree.improvePayouts([2])[0];
-  assert.equal(run.settle(wager.id, multiplier)!.payout, 1495);
-});
-
-test('old saves migrate safely and both skills survive purchases, death and reload', () => {
-  const storage = memoryStorage();
-  storage.setItem('plinko-skills-double-v1', JSON.stringify({ version: 1, bouncyPegs: ['0:1'] }));
-  const tree = new SkillTree('double', storage);
-  assert.equal(tree.returnLevel, 0);
-  const run = new GameRun('double');
-  run.balance = 150;
-  assert.ok(tree.buyReturn(run));
-  assert.ok(tree.buy(run, 8));
+  run.settle(run.drop(0)!.id, 0);
   assert.equal(run.busted, true);
   const restored = new SkillTree('double', storage);
-  assert.equal(restored.returnLevel, 1);
-  assert.equal(restored.level, 2);
-  assert.equal(restored.returnCost, 100);
-  assert.ok(restored.bouncyPegs.includes('0:1'));
-  const classic = new SkillTree('classic', storage);
-  assert.deepEqual(classic.improvePayouts([.1, 2, 110]), [.1, 2, 110]);
-  assert.equal(classic.buyReturn(new GameRun('double')), false);
-  assert.equal(restored.buyReturn(new GameRun('classic')), false);
-});
-
-test('Bucket Return rejects in-flight, unaffordable and failed-save purchases without charging', () => {
-  const run = new GameRun('double');
-  const tree = new SkillTree('double', memoryStorage());
-  const bet = run.drop(0)!;
-  assert.equal(tree.buyReturn(run), false);
-  run.settle(bet.id, .2);
-  assert.equal(tree.buyReturn(run), false);
-  assert.equal(run.balance, 20);
-  run.balance = 100;
-  const broken = new SkillTree('double', { getItem: () => null, setItem: () => { throw new Error('quota'); } });
-  assert.throws(() => broken.buyReturn(run));
-  assert.equal(run.balance, 100);
-  assert.equal(broken.returnLevel, 0);
-  for (const value of [-1, 1.5, '1']) {
-    assert.throws(() => new SkillTree('double', { getItem: () => JSON.stringify({ version: 1, bouncyPegs: [], returnLevel: value }), setItem() {} }));
+  const next = new LifeSkills(8, restored, () => .999);
+  for (const kind of CHARGES) {
+    assert.equal(restored.level(kind), 3);
+    assert.equal(next.remaining(kind).length, 3);
   }
+  assert.ok(next.remaining('bouncy').every(id => id.startsWith('7:')));
 });
 
-test('cash purchases upgrade unique pegs and cost $50, $100, $200, $400', () => {
+test('syncing, switching risk and purchasing other skills never refill consumed charges', () => {
   const tree = new SkillTree('double', memoryStorage());
-  const run = new GameRun('double');
-  run.balance = 1000;
-  for (const cost of [50, 100, 200, 400]) {
-    assert.equal(tree.cost, cost);
+  const run = earned();
+  tree.buy(run, 8, 'bouncy');
+  tree.buy(run, 8, 'bucket');
+  const life = new LifeSkills(8, tree, () => 0);
+  life.consume('bouncy', '0:0');
+  life.consume('bucket', '0');
+  for (const risk of ['low', 'medium', 'high'] as const) {
+    life.sync(tree);
+    const base = payoutTable(risk, 8, 0);
+    assert.deepEqual(life.payouts(base), base);
+    assert.deepEqual(life.remaining('bouncy'), []);
+  }
+  tree.buy(run, 8, 'split');
+  life.sync(tree);
+  assert.deepEqual(life.remaining('bouncy'), []);
+  assert.deepEqual(life.remaining('split'), ['0:0']);
+  tree.buy(run, 8, 'bouncy');
+  tree.buy(run, 8, 'bucket');
+  life.sync(tree);
+  assert.deepEqual(life.remaining('bouncy'), ['0:1']);
+  assert.deepEqual(life.remaining('bucket'), ['1']);
+});
+
+test('Lucky Buckets pay the next whole multiplier once, even for split siblings', () => {
+  assert.deepEqual([.1, .4, .7, 1, 1.2, 2, 110].map(luckyBucketReturn), [1, 1, 1, 2, 2, 3, 111]);
+  const tree = new SkillTree('double', memoryStorage());
+  tree.buy(earned(), 8, 'bucket');
+  const life = new LifeSkills(8, tree, () => 0);
+  const base = [.4, .7, 1.2];
+  assert.deepEqual(life.payouts(base), [1, .7, 1.2]);
+  const run = earned(100);
+  const bet = run.drop(0)!;
+  const first = life.payouts(base)[0];
+  life.consume('bucket', '0');
+  run.settle(bet.id, first, .5);
+  run.settle(bet.id, life.payouts(base)[0], .5);
+  assert.equal(run.balance, 70);
+  assert.deepEqual(life.payouts(base), base);
+  assert.deepEqual(new LifeSkills(8, tree, () => 0).payouts(base), [1, .7, 1.2]);
+});
+
+test('More Starting Money follows $150/$250/$500 with costs exactly ten times the new amount', () => {
+  const storage = memoryStorage();
+  const tree = new SkillTree('double', storage);
+  const run = earned(10000);
+  for (const amount of [150, 250, 500]) {
     const before = run.balance;
-    assert.ok(tree.buy(run, 8, () => 0));
-    assert.equal(run.balance, before - cost);
+    assert.equal(tree.cost('starting'), amount * 10);
+    assert.ok(tree.buy(run, 8, 'starting'));
+    assert.equal(run.balance, before - amount * 10);
+    assert.equal(run.houseStake, 100, 'cannot retroactively change this life');
+    assert.equal(tree.startingDrop, amount);
+    const next = new GameRun('double', new SkillTree('double', storage).startingDrop);
+    assert.equal(next.balance, 0);
+    assert.equal(next.canSpend(25), false);
+    assert.equal(next.drop(0)!.amount, amount);
   }
-  assert.equal(tree.level, 4);
-  assert.equal(new Set(tree.bouncyPegs).size, 4);
-  assert.equal(tree.buy(run, 8), null);
-  assert.equal(run.balance, 250);
+  assert.equal(tree.buy(earned(100000), 8, 'starting'), false);
+  assert.equal(tree.cost('starting'), Infinity);
 });
 
-test('death, a fresh run, reload and mode changes preserve only Double or Nothing upgrades', () => {
+test('purchase caps match the visible layout and excess unlocks return on a larger board', () => {
+  const storage = memoryStorage();
+  storage.setItem('plinko-skills-double-v2', JSON.stringify({ version: 2,
+    levels: { bouncy: pegIds(9).length, split: 0, bucket: 10, starting: 0 } }));
+  const tree = new SkillTree('double', storage);
+  const life = new LifeSkills(8, tree);
+  assert.equal(life.remaining('bouncy').length, pegIds(8).length);
+  assert.equal(life.remaining('bucket').length, 9);
+  const rich = earned(1e30);
+  assert.equal(tree.buy(rich, 8, 'bouncy'), false);
+  assert.equal(tree.buy(rich, 8, 'bucket'), false);
+  assert.ok(tree.buy(rich, 10, 'bouncy'));
+  const next = new LifeSkills(10, tree);
+  assert.equal(next.remaining('bouncy').length, pegIds(9).length + 1);
+  assert.equal(next.remaining('bucket').length, 10);
+});
+
+test('spending the last money ends the life while keeping the bought upgrade', () => {
   const storage = memoryStorage();
   const tree = new SkillTree('double', storage);
-  const run = new GameRun('double');
-  const id = tree.buy(run, 16, () => .999);
-  const wager = run.drop(0)!;
-  run.settle(wager.id, 0);
+  const run = earned(25);
+  assert.ok(tree.buy(run, 8, 'split'));
   assert.equal(run.busted, true);
-  const reloaded = new SkillTree('double', storage);
-  assert.deepEqual(reloaded.bouncyPegs, [id]);
-  assert.equal(reloaded.cost, 100);
-  assert.equal(reloaded.canBuy(new GameRun('double'), 16), true);
-  assert.equal(reloaded.available(8).length, pegIds(8).length);
-  assert.equal(reloaded.available(16).length, pegIds(16).length - 1);
-  const classic = new SkillTree('classic', storage);
-  assert.deepEqual(classic.bouncyPegs, []);
-  assert.equal(classic.buy(new GameRun('double'), 16), null);
-  const classicRun = new GameRun('classic');
-  classicRun.balance = 1000;
-  assert.equal(reloaded.buy(classicRun, 16), null);
+  assert.equal(new SkillTree('double', storage).level('split'), 1);
 });
 
-test('purchases are blocked in flight and when every visible peg is upgraded', () => {
+test('old experimental skills are ignored and their original save stays untouched', () => {
   const storage = memoryStorage();
-  const run = new GameRun('double');
+  const old = JSON.stringify({ version: 1, returnLevel: 9, pityLevel: 9, bouncyPegs: ['0:0'], luckyPegs: ['0:1'] });
+  storage.setItem('plinko-skills-double-v1', old);
   const tree = new SkillTree('double', storage);
-  const bet = run.drop(0)!;
-  assert.equal(tree.buy(run, 8), null);
-  run.settle(bet.id, 2);
-  storage.setItem(tree.key, JSON.stringify({ version: 1, bouncyPegs: pegIds(8) }));
-  const full = new SkillTree('double', storage);
-  run.balance = 1e30;
-  assert.equal(full.buy(run, 8), null);
-  assert.ok(full.buy(run, 9));
+  for (const kind of SKILLS) assert.equal(tree.level(kind), 0);
+  tree.buy(earned(), 8, 'bouncy');
+  assert.equal(storage.getItem('plinko-skills-double-v1'), old);
+  assert.equal(new SkillTree('double', storage).level('bouncy'), 1);
 });
 
-test('an exact-balance purchase ends the run but retains the permanent upgrade', () => {
-  const storage = memoryStorage();
-  const tree = new SkillTree('double', storage);
-  const run = new GameRun('double');
-  run.balance = 50;
-  assert.ok(tree.buy(run, 8));
-  assert.equal(run.busted, true);
-  assert.equal(new SkillTree('double', storage).level, 1);
-});
-
-test('save failures never spend money or grant upgrades; invalid saves are not overwritten', () => {
+test('save failure never spends money or grants an upgrade; corrupt saves are rejected', () => {
   const storage = { getItem: () => null, setItem: () => { throw new Error('quota'); } };
-  const tree = new SkillTree('double', storage);
-  const run = new GameRun('double');
-  assert.throws(() => tree.buy(run, 8));
-  assert.equal(run.balance, 100);
-  assert.equal(tree.level, 0);
-  for (const raw of ['broken', '{"version":2}', '{"version":1,"bouncyPegs":["0:0","0:0"]}']) {
+  for (const kind of SKILLS) {
+    const tree = new SkillTree('double', storage);
+    const run = earned(10000);
+    assert.throws(() => tree.buy(run, 8, kind));
+    assert.equal(run.balance, 10000);
+    assert.equal(tree.level(kind), 0);
+  }
+  for (const raw of ['broken', '{"version":2}', ...[-1, 1.5, '1', 200].map(value =>
+    JSON.stringify({ version: 2, levels: { bouncy: value, split: 0, bucket: 0, starting: 0 } }))]) {
     assert.throws(() => new SkillTree('double', { ...storage, getItem: () => raw }));
   }
 });

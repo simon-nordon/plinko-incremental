@@ -316,6 +316,9 @@ select:disabled {
   margin-top: 14px;
 }
 
+#luckControls { display: grid; gap: 10px; }
+#luckControls[hidden] { display: none; }
+
 .tune .reset-btn {
   align-self: flex-start;
 }
@@ -530,14 +533,12 @@ select:disabled {
 .skill-nodes .skill-node { width: 100%; min-width: 0; padding: 14px 10px; gap: 8px; font-size: 12px; cursor: pointer; }
 .skill-nodes .peg-symbol { width: 32px; height: 32px; font-size: 23px; }
 .skill-node[aria-pressed='false'] { border-color: #536276; background: var(--side); box-shadow: none; }
-.return-node .peg-symbol { background: #6ee7b7; border-color: #6ee7b7; font-size: 18px; }
-.return-node[aria-pressed='true'] { border-color: #6ee7b7; }
+.starting-node .peg-symbol { background: #6ee7b7; border-color: #6ee7b7; font-size: 18px; }
+.starting-node[aria-pressed='true'] { border-color: #6ee7b7; }
 .lucky-node .peg-symbol { background: #facc15; border-color: #facc15; }
 .lucky-node[aria-pressed='true'] { border-color: #facc15; }
-.duplicate-node .peg-symbol { background: #38bdf8; border-color: #38bdf8; }
-.duplicate-node[aria-pressed='true'] { border-color: #38bdf8; }
-.pity-node .peg-symbol { background: #fda4af; border-color: #fda4af; }
-.pity-node[aria-pressed='true'] { border-color: #fda4af; }
+.split-node .peg-symbol { background: #38bdf8; border-color: #38bdf8; }
+.split-node[aria-pressed='true'] { border-color: #38bdf8; }
 .skill-detail[hidden] { display: none; }
 .permanent-tag { color: var(--muted); font-size: 10px; margin-top: 16px; }
 .skill-detail { padding: 24px; min-width: 0; border-left: 1px solid var(--border); }

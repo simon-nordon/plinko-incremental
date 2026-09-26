@@ -1,123 +1,76 @@
 import { MAX_ROWS } from './config';
 import { GameRun, type GameMode } from './game';
 
+export type ChargeKind = 'bouncy' | 'split' | 'bucket';
+export type SkillKind = ChargeKind | 'starting';
+export const CHARGES: readonly ChargeKind[] = ['bouncy', 'split', 'bucket'];
+export const SKILLS: readonly SkillKind[] = [...CHARGES, 'starting'];
+export const STARTING_DROPS = [100, 150, 250, 500] as const;
 export const pegIds = (rows: number): string[] => Array.from({ length: rows }, (_, row) =>
   Array.from({ length: row + 3 }, (_, column) => `${row}:${column}`)).flat();
-
+const targets = (kind: ChargeKind, rows: number): string[] => kind === 'bucket'
+  ? Array.from({ length: rows + 1 }, (_, i) => String(i)) : pegIds(rows);
+export const luckyBucketReturn = (base: number): number => Math.floor(base + 1e-9) + 1;
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>;
-const validPegs = new Set(pegIds(MAX_ROWS));
+type Levels = Record<SkillKind, number>;
 
-/** Each mode owns its progression. Runs can end without touching this save. */
+/** Only unlock counts persist. Old experimental saves remain untouched. */
 export class SkillTree {
-  private owned: string[] = [];
-  private returns = 0;
-  private pity = 0;
-  private lucky: string[] = [];
-  private duplicate: string[] = [];
   readonly key: string;
+  private levels: Levels = { bouncy: 0, split: 0, bucket: 0, starting: 0 };
 
   constructor(readonly mode: GameMode, private storage: Storage) {
-    this.key = `plinko-skills-${mode}-v1`;
+    this.key = `plinko-skills-${mode}-v2`;
     const raw = storage.getItem(this.key);
     if (raw === null) return;
     const saved = JSON.parse(raw);
-    if (saved.version !== 1 || !Array.isArray(saved.bouncyPegs)
-      || saved.bouncyPegs.some((id: unknown) => typeof id !== 'string' || !validPegs.has(id))
-      || new Set(saved.bouncyPegs).size !== saved.bouncyPegs.length
-      || (saved.returnLevel !== undefined && (!Number.isSafeInteger(saved.returnLevel) || saved.returnLevel < 0))
-      || (saved.pity !== undefined && typeof saved.pity !== 'boolean')
-      || (saved.pityLevel !== undefined && (!Number.isSafeInteger(saved.pityLevel) || saved.pityLevel < 0))) {
-      throw new Error('Invalid skill save');
+    if (saved?.version !== 2 || !saved.levels || SKILLS.some(kind =>
+      !Number.isSafeInteger(saved.levels[kind]) || saved.levels[kind] < 0
+      || saved.levels[kind] > this.maximum(kind, MAX_ROWS))) throw new Error('Invalid skill save');
+    this.levels = { ...saved.levels };
+  }
+  maximum(kind: SkillKind, rows: number): number { return kind === 'starting' ? STARTING_DROPS.length - 1 : targets(kind, rows).length; }
+  level(kind: SkillKind): number { return this.mode === 'double' ? this.levels[kind] : 0; }
+  get startingDrop(): number { return STARTING_DROPS[this.level('starting')]; }
+  cost(kind: SkillKind): number {
+    return kind === 'starting' ? (STARTING_DROPS[this.level(kind) + 1] ?? Infinity) * 10 : 25 * 2 ** this.level(kind);
+  }
+  canBuy(run: GameRun, rows: number, kind: SkillKind): boolean {
+    return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.cost(kind))
+      && this.level(kind) < this.maximum(kind, rows);
+  }
+  buy(run: GameRun, rows: number, kind: SkillKind): boolean {
+    if (!this.canBuy(run, rows, kind)) return false;
+    const levels = { ...this.levels, [kind]: this.level(kind) + 1 };
+    this.storage.setItem(this.key, JSON.stringify({ version: 2, levels }));
+    run.spend(this.cost(kind));
+    this.levels = levels;
+    return true;
+  }
+}
+
+/** A life owns its assignments and consumed charges, independent of board redraws. */
+export class LifeSkills {
+  private assigned: Record<ChargeKind, Set<string>> = { bouncy: new Set(), split: new Set(), bucket: new Set() };
+  private charged: Record<ChargeKind, Set<string>> = { bouncy: new Set(), split: new Set(), bucket: new Set() };
+
+  constructor(readonly rows: number, skills: SkillTree | null, private random = Math.random) { this.sync(skills); }
+  /** Newly purchased unlocks add one charge; previously consumed charges stay spent. */
+  sync(skills: SkillTree | null): void {
+    for (const kind of CHARGES) {
+      const choices = targets(kind, this.rows).filter(id => !this.assigned[kind].has(id));
+      const count = Math.min(skills?.level(kind) ?? 0, targets(kind, this.rows).length);
+      while (this.assigned[kind].size < count && choices.length) {
+        const index = Math.min(choices.length - 1, Math.max(0, Math.floor(this.random() * choices.length)));
+        const [id] = choices.splice(index, 1);
+        this.assigned[kind].add(id);
+        this.charged[kind].add(id);
+      }
     }
-    this.owned = [...saved.bouncyPegs];
-    this.returns = saved.returnLevel ?? 0;
-    this.pity = saved.pityLevel ?? Number(saved.pity ?? false);
-    const lucky = saved.luckyPegs ?? [];
-    const duplicate = saved.duplicatePegs ?? [];
-    if (!Array.isArray(lucky) || !Array.isArray(duplicate)) throw new Error('Invalid peg save');
-    const all = [...this.owned, ...lucky, ...duplicate];
-    if (all.some(id => !validPegs.has(id)) || new Set(all).size !== all.length) throw new Error('Invalid peg save');
-    this.lucky = lucky;
-    this.duplicate = duplicate;
   }
-
-  get bouncyPegs(): readonly string[] { return this.mode === 'double' ? this.owned : []; }
-  get level(): number { return this.bouncyPegs.length; }
-  get cost(): number { return 50 * 2 ** this.level; }
-  get returnLevel(): number { return this.mode === 'double' ? this.returns : 0; }
-  get returnMultiplier(): number { return 1 + this.returnLevel * 0.05; }
-  get returnCost(): number { return 50 * 2 ** this.returnLevel; }
-  get pityLevel(): number { return this.mode === 'double' ? this.pity : 0; }
-  get hasPity(): boolean { return this.pityLevel > 0; }
-  get pityCost(): number { return 50 * 2 ** this.pityLevel; }
-  get luckyPegs(): readonly string[] { return this.mode === 'double' ? this.lucky : []; }
-  get duplicatePegs(): readonly string[] { return this.mode === 'double' ? this.duplicate : []; }
-  pegCost(kind: 'lucky' | 'duplicate'): number { return 50 * 2 ** (kind === 'lucky' ? this.luckyPegs.length : this.duplicatePegs.length); }
-  canBuyPeg(run: GameRun, rows: number, kind: 'lucky' | 'duplicate'): boolean {
-    return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.pegCost(kind)) && this.available(rows).length > 0;
-  }
-  buyPeg(run: GameRun, rows: number, kind: 'lucky' | 'duplicate', random = Math.random): string | null {
-    if (!this.canBuyPeg(run, rows, kind)) return null;
-    const choices = this.available(rows);
-    const id = choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))];
-    const cost = this.pegCost(kind);
-    const lucky = kind === 'lucky' ? [...this.lucky, id] : this.lucky;
-    const duplicate = kind === 'duplicate' ? [...this.duplicate, id] : this.duplicate;
-    this.save(this.owned, this.returns, this.pity, lucky, duplicate);
-    run.spend(cost);
-    this.lucky = lucky;
-    this.duplicate = duplicate;
-    return id;
-  }
-  pityActive(balanceBeforeDrop: number): boolean {
-    return this.hasPity && balanceBeforeDrop < 100;
-  }
-  improvePayouts(payouts: number[], balanceBeforeDrop = Infinity): number[] {
-    const pityMultiplier = this.pityActive(balanceBeforeDrop) ? 1 + this.pityLevel * .05 : 1;
-    return payouts.map(value => value * this.returnMultiplier * pityMultiplier);
-  }
-  canBuyPity(run: GameRun): boolean {
-    return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.pityCost);
-  }
-  buyPity(run: GameRun): boolean {
-    if (!this.canBuyPity(run)) return false;
-    this.save(this.owned, this.returns, this.pity + 1);
-    run.spend(this.pityCost);
-    this.pity++;
-    return true;
-  }
-  canBuyReturn(run: GameRun): boolean {
-    return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.returnCost);
-  }
-  buyReturn(run: GameRun): boolean {
-    if (!this.canBuyReturn(run)) return false;
-    this.save(this.owned, this.returns + 1);
-    run.spend(this.returnCost);
-    this.returns++;
-    return true;
-  }
-  private save(bouncyPegs: string[], returnLevel: number, pityLevel = this.pity, luckyPegs = this.lucky, duplicatePegs = this.duplicate): void {
-    this.storage.setItem(this.key, JSON.stringify({ version: 1, bouncyPegs, returnLevel, pityLevel, luckyPegs, duplicatePegs }));
-  }
-  available(rows: number): string[] {
-    const owned = new Set([...this.bouncyPegs, ...this.luckyPegs, ...this.duplicatePegs]);
-    return pegIds(rows).filter(id => !owned.has(id));
-  }
-  canBuy(run: GameRun, rows: number): boolean {
-    return this.mode === 'double' && run.mode === this.mode && run.canSpend(this.cost)
-      && this.available(rows).length > 0;
-  }
-
-  /** Persist first: failed storage must never charge the player's balance. */
-  buy(run: GameRun, rows: number, random = Math.random): string | null {
-    if (!this.canBuy(run, rows)) return null;
-    const choices = this.available(rows);
-    const id = choices[Math.min(choices.length - 1, Math.max(0, Math.floor(random() * choices.length)))];
-    const next = [...this.owned, id];
-    const cost = this.cost;
-    this.save(next, this.returns);
-    run.spend(cost);
-    this.owned = next;
-    return id;
+  remaining(kind: ChargeKind): readonly string[] { return [...this.charged[kind]]; }
+  consume(kind: ChargeKind, id: string): boolean { return this.charged[kind].delete(id); }
+  payouts(base: number[]): number[] {
+    return base.map((value, k) => this.charged.bucket.has(String(k)) ? luckyBucketReturn(value) : value);
   }
 }

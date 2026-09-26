@@ -1,6 +1,6 @@
 import Matter from 'matter-js';
 import { DEFAULT_PHYSICS, SPAWN_GAP, ballStyle, bucketColor, type PhysicsSettings } from './config';
-import { fmtMult, fmtChange } from './format';
+import { fmtMult } from './format';
 
 // A real Matter.js simulation. Random spawn positions create variation; balls
 // collide with pins and walls independently, as in the reference game.
@@ -52,8 +52,7 @@ interface Peg {
   body: Matter.Body;
   id: string;
   bouncy: boolean;
-  lucky: boolean;
-  duplicate: boolean;
+  split: boolean;
   row: number;
   flash: number;
 }
@@ -63,7 +62,6 @@ interface Ball {
   tier: number;
   wagerId: number;
   share: number;
-  splitPegs: Set<string>;
   /** radius it spawned with; the size slider only affects new balls */
   r: number;
   /** Extra pin impulse captured at spawn, just like restitution and size. */
@@ -86,7 +84,7 @@ interface FloatText {
 export interface BoardHooks {
   onPegHit(row: number, tier: number): void;
   onLand(bucket: number, tier: number, wagerId: number, share: number): void;
-  onLuckyHit?(wagerId: number, share: number): number;
+  onChargeUsed?(kind: 'bouncy' | 'split', pegId: string): void;
 }
 
 export class Board {
@@ -100,6 +98,7 @@ export class Board {
   private chuteHalfWidth = 0;
   private wallCos = 1;
   private bucketAnim: number[] = [];
+  private luckyBuckets = new Set<string>();
   private balls: Ball[] = [];
   private ballById = new Map<number, Ball>();
   /** Drops waiting to enter the board, oldest first. */
@@ -130,7 +129,7 @@ export class Board {
         peg.flash = 1;
         // collisionStart fires BEFORE Matter resolves velocity. Apply bumper impulses
         // after Engine.update so the solver cannot absorb or reverse the extra bounce.
-        if (ball.bumperKick > 0 || peg.bouncy || peg.lucky || peg.duplicate) this.pinContacts.push({ ball, peg });
+        if (ball.bumperKick > 0 || peg.bouncy || peg.split) this.pinContacts.push({ ball, peg });
         this.hooks.onPegHit(peg.row, ball.tier);
       }
     });
@@ -166,6 +165,7 @@ export class Board {
   setLayout(rows: number, mults: number[]): void {
     this.rows = rows;
     this.mults = mults;
+    this.luckyBuckets.clear();
     Matter.Composite.clear(this.engine.world, false);
     this.pegs = [];
     this.pegById.clear();
@@ -192,7 +192,7 @@ export class Board {
           isStatic: true,
           collisionFilter: { category: PIN, mask: BALL },
         });
-        const peg = { body, id: `${r}:${j}`, bouncy: false, lucky: false, duplicate: false, row: r, flash: 0 };
+        const peg = { body, id: `${r}:${j}`, bouncy: false, split: false, row: r, flash: 0 };
         this.pegs.push(peg);
         this.pegById.set(body.id, peg);
         if (r === rows - 1) this.lastRowX.push(x);
@@ -223,18 +223,17 @@ export class Board {
     this.mults = mults;
   }
 
-  setBouncyPegs(ids: readonly string[]): void {
-    const upgraded = new Set(ids);
-    for (const peg of this.pegs) peg.bouncy = upgraded.has(peg.id);
+  setPegCharges(bouncyIds: readonly string[], splitIds: readonly string[]): void {
+    const bouncy = new Set(bouncyIds);
+    const split = new Set(splitIds);
+    for (const peg of this.pegs) {
+      peg.bouncy = bouncy.has(peg.id);
+      peg.split = split.has(peg.id);
+    }
   }
 
-  setSpecialPegs(lucky: readonly string[], duplicate: readonly string[]): void {
-    const gold = new Set(lucky);
-    const split = new Set(duplicate);
-    for (const peg of this.pegs) {
-      peg.lucky = gold.has(peg.id);
-      peg.duplicate = split.has(peg.id);
-    }
+  setLuckyBuckets(ids: readonly string[]): void {
+    this.luckyBuckets = new Set(ids);
   }
 
   drop(tier: number, wagerId = 0): void {
@@ -267,7 +266,7 @@ export class Board {
     });
     Matter.Composite.add(this.engine.world, body);
     const ball: Ball = {
-      body, tier, wagerId, share: 1, splitPegs: new Set(), r, steps: 0, trail: [], previous: { ...body.position },
+      body, tier, wagerId, share: 1, r, steps: 0, trail: [], previous: { ...body.position },
       bumperKick: BUMPER_KICK * Math.max(0, this.physics.bounce - 1),
     };
     this.balls.push(ball);
@@ -318,6 +317,13 @@ export class Board {
 
   private applyBumpers(): void {
     for (const { ball, peg } of this.pinContacts) {
+      // Consume before processing the next contact, even if two balls hit in one step.
+      // A stacked peg spends both charges on this impact.
+      const bouncy = peg.bouncy;
+      const split = peg.split;
+      peg.bouncy = peg.split = false;
+      if (bouncy) this.hooks.onChargeUsed?.('bouncy', peg.id);
+      if (split) this.hooks.onChargeUsed?.('split', peg.id);
       const dx = ball.body.position.x - peg.body.position.x;
       const dy = ball.body.position.y - peg.body.position.y;
       const d = Math.hypot(dx, dy) || 1;
@@ -325,19 +331,13 @@ export class Board {
       // Quadruple the ordinary outward rebound after the solver has resolved impact.
       // Tangential motion is unchanged; the existing speed cap still bounds energy.
       const rebound = Math.max(0, (v.x * dx + v.y * dy) / d + ball.bumperKick);
-      const kick = ball.bumperKick + (peg.bouncy ? 3 * rebound : 0);
+      const kick = ball.bumperKick + (bouncy ? 3 * rebound : 0);
       Matter.Body.setVelocity(ball.body, {
         x: v.x + (dx / d) * kick,
         y: v.y + (dy / d) * kick,
       });
-      if (peg.lucky) {
-        const award = this.hooks.onLuckyHit?.(ball.wagerId, ball.share) ?? 0;
-        if (award > 0) this.texts.push({ x: peg.body.position.x, y: peg.body.position.y,
-          vy: -45, life: 1.2, max: 1.2, text: fmtChange(award), color: '#facc15', size: this.pinGap * .4 });
-      }
-      if (peg.duplicate && !ball.splitPegs.has(peg.id) && this.balls.length < 256) {
-        // Children inherit visited split pegs, preventing a re-contact cascade.
-        ball.splitPegs.add(peg.id);
+      if (split) {
+        // Each peg can split only once per life, naturally bounding the body count.
         ball.share /= 2;
         const position = { ...ball.body.position };
         const velocity = { ...ball.body.velocity };
@@ -346,7 +346,7 @@ export class Board {
           frictionAir: ball.body.frictionAir, slop: ball.body.slop,
           collisionFilter: { category: BALL, mask: PIN },
         });
-        const child: Ball = { ...ball, body, previous: position, trail: [], splitPegs: new Set(ball.splitPegs) };
+        const child: Ball = { ...ball, body, previous: position, trail: [] };
         Matter.Body.setVelocity(ball.body, { x: velocity.x - .8, y: velocity.y });
         Matter.Body.setVelocity(body, { x: velocity.x + .8, y: velocity.y });
         Matter.Composite.add(this.engine.world, body);
@@ -455,9 +455,9 @@ export class Board {
         ctx.arc(px, py, pinR * (1.8 + 1.5 * (1 - p.flash)) * s, 0, Math.PI * 2);
         ctx.fill();
       }
-      const pegColor = p.lucky ? '#facc15' : p.duplicate ? '#38bdf8' : p.bouncy ? '#b593ff' : '#ffffff';
-      if (p.bouncy || p.lucky || p.duplicate) {
-        ctx.strokeStyle = pegColor;
+      const pegColor = p.bouncy ? '#b593ff' : p.split ? '#38bdf8' : '#ffffff';
+      if (p.bouncy || p.split) {
+        ctx.strokeStyle = p.split ? '#38bdf8' : pegColor;
         ctx.lineWidth = Math.max(1, s);
         ctx.beginPath();
         ctx.arc(px, py, pinR * 1.7 * s, 0, Math.PI * 2);
@@ -539,6 +539,13 @@ export class Board {
       ctx.fillStyle = bucketColor(k, this.buckets);
       roundRect(ctx, x0, y0, w * s, h * s, r);
       ctx.fill();
+      if (this.luckyBuckets.has(String(k))) {
+        ctx.fillStyle = '#b8860b';
+        ctx.fill();
+        ctx.strokeStyle = '#fde68a';
+        ctx.lineWidth = 2 * s;
+        ctx.stroke();
+      }
       if (bounce > 0) {
         ctx.fillStyle = `rgba(255,255,255,${0.35 * bounce})`;
         ctx.fill();
