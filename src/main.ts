@@ -16,6 +16,7 @@ import {
 } from './config';
 import { fmt, fmtChange, fmtMoney, fmtMult } from './format';
 import { GameRun, type GameMode } from './game';
+import { IncrementalSkills, INCREMENTAL_SKILLS, type IncrementalKind } from './incremental';
 import { payoutTable } from './payouts';
 import { resetAllProgress } from './progress';
 import { affordableTiers, type BallTier } from './tiers';
@@ -27,7 +28,7 @@ const el = {
   devMode: $<HTMLButtonElement>('devMode'),
   boardSettings: $('boardSettings'),
   tuningPanel: $('tuningPanel'),
-  gameMode: $<HTMLInputElement>('gameMode'),
+  gameMode: $<HTMLSelectElement>('gameMode'),
   balance: $('balance'),
   lossThreshold: $('lossThreshold'),
   risk: $<HTMLSelectElement>('risk'),
@@ -38,6 +39,10 @@ const el = {
   allInLabel: $('allInLabel'),
   allInAmount: $('allInAmount'),
   allInRules: $('allInRules'),
+  oneBallStats: $('oneBallStats'),
+  ballCapacity: $('ballCapacity'),
+  ballValue: $('ballValue'),
+  capacityFill: $('capacityFill'),
   mute: $<HTMLButtonElement>('mute'),
   reset: $<HTMLButtonElement>('reset'),
   luck: $<HTMLInputElement>('luck'),
@@ -74,10 +79,10 @@ const el = {
 // Settings are a per-browser convenience; the run itself always starts fresh.
 const PREFS_KEY = 'plinko-prefs';
 function loadPrefs(forMode?: GameMode): { mode: GameMode; risk: Risk; rows: number; muted: boolean; luck: number; physics: PhysicsSettings } {
-  const def = { mode: forMode ?? 'double' as GameMode, risk: 'high' as Risk, rows: 16, muted: false, luck: DEFAULT_LUCK, physics: { ...DEFAULT_PHYSICS } };
+  const def = { mode: forMode ?? 'double' as GameMode, risk: (forMode === 'oneball' ? 'low' : 'high') as Risk, rows: 16, muted: false, luck: DEFAULT_LUCK, physics: { ...DEFAULT_PHYSICS } };
   try {
     const shared = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}');
-    const selected: GameMode = forMode ?? (shared.mode === 'classic' ? 'classic' : 'double');
+    const selected: GameMode = forMode ?? (shared.mode === 'classic' || shared.mode === 'oneball' ? shared.mode : 'double');
     const saved = JSON.parse(localStorage.getItem(`${PREFS_KEY}-${selected}`) ?? (forMode ? '{}' : JSON.stringify(shared)));
     const savedRisk = saved.risk === 'high' && saved.riskVersion !== RISK_VERSION ? 'extreme' : saved.risk;
     return { ...def, ...saved, risk: savedRisk ?? def.risk, mode: selected, muted: shared.muted ?? false, physics: saved.physicsVersion === PHYSICS_VERSION ? saved.physics : def.physics };
@@ -105,11 +110,18 @@ let denyTimer = 0;
 let resetArmed = 0;
 let visibleTiers: BallTier[] = [];
 let skills: SkillTree | null = null;
+let incrementalSkills: IncrementalSkills | null = null;
 let skillMessage = '';
-let selectedSkill: SkillKind = 'bouncy';
+type UpgradeKind = SkillKind | IncrementalKind;
+const ALL_SKILLS: readonly UpgradeKind[] = [...SKILLS, 'capacity', 'value', 'cashback'];
+let selectedSkill: UpgradeKind = 'bouncy';
 function loadSkills(): void {
+  skills = null;
+  incrementalSkills = null;
+  selectedSkill = mode === 'oneball' ? 'value' : 'bouncy';
   try {
-    skills = new SkillTree(mode, localStorage);
+    if (mode === 'oneball') incrementalSkills = new IncrementalSkills(localStorage);
+    else skills = new SkillTree(mode, localStorage);
     skillMessage = '';
   } catch {
     skills = null;
@@ -117,14 +129,15 @@ function loadSkills(): void {
   }
 }
 loadSkills();
-function freshRun(): GameRun { return new GameRun(mode, skills?.startingDrop ?? 10); }
+function currentChargeSkills() { return mode === 'oneball' ? incrementalSkills : skills; }
+function freshRun(): GameRun { return new GameRun(mode, skills?.startingDrop ?? 10, incrementalSkills?.settings); }
 let run = freshRun();
-let lifeSkills = new LifeSkills(rows, skills);
+let lifeSkills = new LifeSkills(rows, currentChargeSkills());
 
 const board = new Board($<HTMLCanvasElement>('board'), {
   onPegHit: (row, tier) => sfx.peg(row, 'normal', tier),
   onLand,
-  onDuplicate: id => { run.duplicate(id); render(); },
+  onDuplicate: (id, extraValue) => run.duplicate(id, extraValue),
   onChargeUsed: (kind, id) => {
     lifeSkills.consume(kind, id);
     renderSkills();
@@ -137,16 +150,17 @@ function applyPegCharges(): void {
 }
 
 function applyLayout(): void {
+  board.fullValueSplits = mode === 'oneball';
   board.setLayout(rows, []);
   applyPegCharges();
   applyLuck();
 }
 
 function applyLuck(): void {
-  const payouts = payoutTable(risk, rows, mode === 'double' ? 0 : luck);
+  const payouts = payoutTable(risk, rows, mode === 'classic' ? luck : 0);
   board.setMults(lifeSkills.payouts(payouts));
   board.setLuckyBuckets(lifeSkills.remaining('bucket'));
-  el.luckControls.hidden = mode === 'double';
+  el.luckControls.hidden = mode !== 'classic';
   el.luckValue.textContent = (luck > 0 ? '+' : luck < 0 ? '−' : '') + Math.abs(luck) + '%';
   el.luckNote.textContent = luck === 0 ? 'Original reference payouts.'
     : `Every base payout × ${(1 + luck / 100).toFixed(2)}. A 2× bucket pays ${fmtMult(2 * (1 + luck / 100))}.`;
@@ -186,7 +200,7 @@ el.resetPhysics.addEventListener('click', () => {
 function drop(tier: number): boolean {
   const wager = run.drop(tier);
   if (!wager) return false;
-  if (skills) skillMessage = '';
+  if (currentChargeSkills()) skillMessage = '';
   sfx.unlock();
   board.drop(wager.tier, wager.id);
   sfx.drop();
@@ -195,9 +209,9 @@ function drop(tier: number): boolean {
   return true;
 }
 
-function onLand(k: number, tier: number, wagerId: number, share: number): void {
+function onLand(k: number, tier: number, wagerId: number, share: number, valueShare: number): void {
   const mult = board.mults[k];
-  const result = run.settle(wagerId, mult, share);
+  const result = run.settle(wagerId, mult, share, valueShare);
   if (!result) return;
   lifeSkills.consume('bucket', String(k));
   const { profit } = result;
@@ -208,6 +222,11 @@ function onLand(k: number, tier: number, wagerId: number, share: number): void {
   if (mult >= 3) board.bucketBurst(k, color, Math.min(80, 10 + mult * 2));
   if (mult >= 10) board.addShake(Math.min(14, 3 + mult / 10));
   if (result.complete) pushHistory(result.totalPayout / result.wager.amount, result.totalProfit, color);
+
+  if (mode === 'oneball' && run.active === 0) {
+    lifeSkills = new LifeSkills(rows, incrementalSkills);
+    applyPegCharges();
+  }
 
   // The run ends only once nothing is left in play and the cheapest ball is out of reach.
   if (run.busted) bust();
@@ -240,14 +259,14 @@ function bust(): void {
 }
 
 function restart(): void {
-  if (skills) skillMessage = '';
+  if (currentChargeSkills()) skillMessage = '';
   window.clearTimeout(overTimer);
   window.clearTimeout(denyTimer);
   window.clearTimeout(resetArmed);
   overTimer = denyTimer = resetArmed = 0;
   el.reset.textContent = '↺ New Game';
   run = freshRun();
-  lifeSkills = new LifeSkills(rows, skills);
+  lifeSkills = new LifeSkills(rows, currentChargeSkills());
   applyLayout(); // Clear old balls and deal fresh charges for this life.
   el.over.hidden = true;
   el.history.replaceChildren();
@@ -292,24 +311,31 @@ function render(): void {
   applyLuck();
   const { balance, peak, busted } = run;
   const allInMode = mode === 'double';
-  board.ballStyleOverride = allInMode ? { color: '#ef4444', deep: '#991b1b' } : null;
+  const oneBallMode = mode === 'oneball';
+  board.ballStyleOverride = allInMode ? { color: '#ef4444', deep: '#991b1b' }
+    : oneBallMode ? { color: '#38bdf8', deep: '#0369a1' } : null;
   el.lossThreshold.hidden = !allInMode;
   el.lossThreshold.textContent = `Forced cash out: ${fmtMoney(run.minimumBet)}`;
   renderTierButtons();
   el.balance.textContent = fmtMoney(balance);
   el.peak.textContent = fmtMoney(peak);
   el.risk.disabled = el.gameMode.disabled = run.active > 0;
-  el.rows.disabled = run.active > 0 || (allInMode && run.drops > 0);
-  el.rows.title = allInMode && run.drops > 0 ? 'Rows are fixed until the next life.' : '';
-  el.gameMode.checked = allInMode;
-  el.tiers.hidden = allInMode;
-  el.dropStatus.hidden = allInMode || balance >= run.minimumBet || run.active === 0;
-  el.allIn.hidden = el.allInRules.hidden = !allInMode;
-  el.allInRules.textContent = 'Every drop bets your full balance.';
-  el.allIn.disabled = busted || run.active > 0;
-  el.allInLabel.textContent = run.houseDropAvailable ? 'Drop Ball · On the House'
+  el.rows.disabled = run.active > 0 || (mode !== 'classic' && run.drops > 0);
+  el.rows.title = mode !== 'classic' && run.drops > 0 ? 'Rows are fixed until the next life.' : '';
+  el.gameMode.value = mode;
+  el.tiers.hidden = mode !== 'classic';
+  el.dropStatus.hidden = mode !== 'classic' || balance >= run.minimumBet || run.active === 0;
+  el.allIn.hidden = el.allInRules.hidden = mode === 'classic';
+  el.allInRules.textContent = oneBallMode ? 'Start with $5. Every ball costs $1. Grow your payout value with permanent upgrades.' : 'Every drop bets your full balance.';
+  el.allIn.disabled = busted || (oneBallMode ? balance < 1 || run.activeBalls >= run.maxBalls : run.active > 0);
+  el.allInLabel.textContent = oneBallMode ? (run.activeBalls >= run.maxBalls ? 'Board full · Wait for a slot' : balance < 1 && run.active ? 'Waiting for payouts' : 'Drop 1 Ball')
+    : run.houseDropAvailable ? 'Drop Ball · On the House'
     : run.active > 0 ? 'Drop in play' : 'Drop Ball · All In';
-  el.allInAmount.textContent = fmtMoney(run.houseDropAvailable ? run.houseStake : run.active > 0 ? run.inPlay : balance);
+  el.allInAmount.textContent = oneBallMode ? '$1.00' : fmtMoney(run.houseDropAvailable ? run.houseStake : run.active > 0 ? run.inPlay : balance);
+  el.oneBallStats.hidden = !oneBallMode;
+  el.ballCapacity.textContent = `${run.activeBalls} / ${run.maxBalls}`;
+  el.ballValue.textContent = fmtMoney(run.ballValue);
+  el.capacityFill.style.width = `${run.activeBalls / run.maxBalls * 100}%`;
   el.houseNote.hidden = !run.houseDropAvailable;
   el.houseNote.textContent = `Your first ${fmtMoney(run.houseStake)} ball is on the house. Only its winnings can buy upgrades.`;
   el.reset.title = allInMode ? `New life with a ${fmtMoney(skills?.startingDrop ?? 10)} house ball` : 'Start over from $5';
@@ -325,13 +351,22 @@ const skillInfo: Record<SkillKind, { title: string; description: string }> = {
 };
 
 function renderSkills(): void {
-  el.openSkills.hidden = el.overSkills.hidden = mode !== 'double';
+  el.openSkills.hidden = el.overSkills.hidden = mode === 'classic';
+  const oneBallMode = mode === 'oneball';
+  const modeTitle = oneBallMode ? '1 Ball · Incremental' : 'Double or Nothing';
+  $('skillsMode').textContent = $('skillRoot').textContent = modeTitle;
+  $('skillMap').setAttribute('aria-label', `${modeTitle} skill tree`);
+  $('skillsIntro').textContent = oneBallMode
+    ? 'Build up your $1 drops. Upgrades survive every new game; special pegs and buckets recharge whenever the board clears.'
+    : 'Buy permanent unlocks with winnings. Peg and bucket charges refresh and move each life.';
+  for (const kind of ALL_SKILLS) $('select' + kind).hidden = oneBallMode ? kind === 'starting' : !SKILLS.includes(kind as SkillKind);
+  if (oneBallMode) { renderIncrementalSkills(); return; }
   el.skillCount.textContent = `${SKILLS.reduce((sum, kind) => sum + (skills?.level(kind) ?? 0), 0)} owned`;
   for (const kind of SKILLS) {
     $(kind + 'NodeLevel').textContent = `Level ${skills?.level(kind) ?? 0}`;
     $('select' + kind).setAttribute('aria-pressed', String(kind === selectedSkill));
   }
-  const kind = selectedSkill;
+  const kind = selectedSkill as SkillKind;
   const level = skills?.level(kind) ?? 0;
   const cost = skills?.cost(kind) ?? (kind === 'starting' ? 500 : 25);
   const maxed = !!skills && level >= skills.maximum(kind, rows);
@@ -357,6 +392,53 @@ function renderSkills(): void {
     : 'Paid from your earned balance.');
 }
 
+const incrementalInfo: Record<IncrementalKind, { title: string; description: string }> = {
+  capacity: { title: 'Max Balls', description: 'Add one more slot to the board, starting from five and growing to fifty. Purchased balls, queued balls and split children all use a slot. A slot opens as soon as a ball lands.' },
+  value: { title: 'Ball Value', description: 'Increase each new ball’s payout value by 5%, compounded per level. A ball still costs only $1. Its value is multiplied by the bucket it lands in.' },
+  bouncy: { title: 'Bouncy Peg', description: 'Add a charged purple peg that kicks a ball sideways on contact. Each level adds one charge. Charges recharge and move to fresh random positions when the board clears.' },
+  split: { title: 'Split Peg', description: 'Add a charged blue peg that creates an extra ball with the same payout value, at no extra cost. Splits need a free ball slot; blocked charges stay ready. Each level adds one charge, recharged when the board clears.' },
+  bucket: { title: 'Golden Bucket', description: 'Add a golden bucket that pays double to the first ball that lands there. Each level adds another bucket. All golden buckets recharge and move when the board clears.' },
+  cashback: { title: 'Cashback', description: 'Return another 5¢ of each $1 purchase after that drop and all its split children land. This is added to your bucket winnings once per purchase, up to a full $1 refund at level 20.' },
+};
+
+function renderIncrementalSkills(): void {
+  const tree = incrementalSkills;
+  const kind = selectedSkill as IncrementalKind;
+  const level = tree?.level(kind) ?? 0;
+  const cost = tree?.cost(kind) ?? 0;
+  const maxed = !!tree && level >= tree.maximum(kind, rows);
+  el.skillCount.textContent = `${INCREMENTAL_SKILLS.reduce((sum, key) => sum + (tree?.level(key) ?? 0), 0)} owned`;
+  for (const key of INCREMENTAL_SKILLS) {
+    $(key + 'NodeLevel').textContent = `Level ${tree?.level(key) ?? 0}`;
+    $('select' + key).setAttribute('aria-pressed', String(key === kind));
+  }
+  el.skillTitle.textContent = incrementalInfo[kind].title;
+  el.skillDescription.textContent = incrementalInfo[kind].description;
+  el.skillLevel.textContent = String(level);
+  el.skillBalance.textContent = fmtMoney(run.balance);
+  if (kind === 'capacity') {
+    el.skillRemaining.textContent = `Capacity: ${run.maxBalls} balls, including split children.`;
+    el.skillPriceNote.textContent = maxed ? 'Maximum capacity reached.' : `Next: ${run.maxBalls + 1} balls at once.`;
+  } else if (kind === 'value') {
+    el.skillRemaining.textContent = `Current payout value: ${fmtMoney(run.ballValue)} per ball. Purchase price: $1.`;
+    el.skillPriceNote.textContent = `Next: ${fmtMoney(run.ballValue * 1.05)} payout value (+5%).`;
+  } else if (kind === 'cashback') {
+    el.skillRemaining.textContent = `Current refund: ${fmtMoney(level * .05)} per purchased ball.`;
+    el.skillPriceNote.textContent = maxed ? 'Every purchased ball now refunds its $1 cost.' : `Next: ${fmtMoney((level + 1) * .05)} back after each drop settles.`;
+  } else {
+    el.skillRemaining.textContent = `${lifeSkills.remaining(kind).length} of ${Math.min(level, tree?.maximum(kind, rows) ?? level)} charges ready. Let every ball land to recharge.`;
+    el.skillPriceNote.textContent = 'Adds one charge immediately and to every future recharge.';
+  }
+  el.buySkill.disabled = !tree?.canBuy(run, rows, kind);
+  el.buySkill.textContent = maxed ? 'Maximum reached' : `Upgrade · ${fmtMoney(cost)}`;
+  el.skillStatus.textContent = skillMessage || (run.active ? 'Wait for every ball to land before upgrading.'
+    : run.busted ? 'Start a new game. Your upgrades are kept.'
+    : maxed ? 'All available upgrades are owned.'
+    : run.balance < cost ? `Need ${fmtMoney(cost - run.balance)} more.`
+    : run.balance - cost < 1 ? 'Keep $1 for your next ball.'
+    : 'Permanent upgrade. Applies immediately.');
+}
+
 // ---- wiring ----
 el.devMode.addEventListener('click', () => {
   const enabled = el.devMode.getAttribute('aria-pressed') !== 'true';
@@ -367,7 +449,7 @@ el.devMode.addEventListener('click', () => {
 el.gameMode.addEventListener('change', () => {
   if (run.active > 0) { render(); return; }
   savePrefs();
-  mode = el.gameMode.checked ? 'double' : 'classic';
+  mode = el.gameMode.value as GameMode;
   ({ risk, rows, luck, physics } = loadPrefs(mode));
   el.risk.value = risk;
   el.rows.value = String(rows);
@@ -379,29 +461,34 @@ el.gameMode.addEventListener('change', () => {
   savePrefs();
 });
 el.openSkills.addEventListener('click', () => {
-  if (mode !== 'double') return;
-  if (skills) skillMessage = '';
+  if (mode === 'classic') return;
+  if (currentChargeSkills()) skillMessage = '';
   renderSkills();
   el.skills.showModal();
 });
 el.closeSkills.addEventListener('click', () => el.skills.close());
-for (const kind of SKILLS) {
+for (const kind of ALL_SKILLS) {
   $('select' + kind).addEventListener('click', () => {
     selectedSkill = kind;
-    if (skills) skillMessage = '';
+    if (currentChargeSkills()) skillMessage = '';
     renderSkills();
   });
 }
 el.buySkill.addEventListener('click', () => {
   try {
-    if (!skills?.buy(run, rows, selectedSkill)) return;
-    lifeSkills.sync(skills);
+    if (mode === 'oneball') {
+      if (!incrementalSkills?.buy(run, rows, selectedSkill as IncrementalKind)) return;
+      skillMessage = 'Saved permanently. Your upgrade is active.';
+    } else {
+      if (!skills?.buy(run, rows, selectedSkill as SkillKind)) return;
+      skillMessage = selectedSkill === 'starting'
+        ? `Saved. Your next life's house ball will be ${fmtMoney(skills.startingDrop)}.`
+        : 'Saved permanently. One new charge added to this life.';
+    }
+    lifeSkills.sync(currentChargeSkills());
     applyPegCharges();
     sfx.unlock();
     sfx.buy();
-    skillMessage = selectedSkill === 'starting'
-      ? `Saved. Your next life's house ball will be ${fmtMoney(skills.startingDrop)}.`
-      : 'Saved permanently. One new charge added to this life.';
     if (run.busted) { el.skills.close(); bust(); }
   } catch { skillMessage = 'Could not save the upgrade. No money was spent. Please try again.'; }
   render();
@@ -419,9 +506,9 @@ el.risk.addEventListener('change', () => {
   savePrefs();
 });
 el.rows.addEventListener('change', () => {
-  if (run.active || (mode === 'double' && run.drops > 0)) { el.rows.value = String(rows); return; }
+  if (run.active || (mode !== 'classic' && run.drops > 0)) { el.rows.value = String(rows); return; }
   rows = Number(el.rows.value);
-  lifeSkills = new LifeSkills(rows, skills);
+  lifeSkills = new LifeSkills(rows, currentChargeSkills());
   applyLayout();
   savePrefs();
 });
@@ -459,11 +546,11 @@ let progressResetArmed = 0;
 el.resetProgress.addEventListener('click', () => {
   if (!progressResetArmed) {
     el.resetProgress.textContent = 'Confirm reset all progress';
-    el.resetProgressStatus.textContent = 'Tap again within 5 seconds to erase both modes, all upgrades and settings.';
+    el.resetProgressStatus.textContent = 'Tap again within 5 seconds to erase all modes, all upgrades and settings.';
     progressResetArmed = window.setTimeout(() => {
       progressResetArmed = 0;
       el.resetProgress.textContent = 'Reset all progress';
-      el.resetProgressStatus.textContent = 'Dev tool: clears both modes, upgrades and settings in this browser.';
+      el.resetProgressStatus.textContent = 'Dev tool: clears all modes, upgrades and settings in this browser.';
     }, 5000);
     return;
   }
@@ -488,7 +575,7 @@ window.addEventListener('keydown', (e) => {
     if (!el.over.hidden && !e.repeat) restart();
     return;
   }
-  if (mode === 'double') {
+  if (mode !== 'classic') {
     if (slot === 0 && !e.repeat) pressTier(0);
   } else if (visibleTiers[slot]) pressTier(visibleTiers[slot].index);
 });
@@ -501,10 +588,10 @@ let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  const wasActive = board.active > 0;
+  const active = board.active;
   board.update(dt);
   board.render();
-  if (wasActive !== board.active > 0) render();
+  if (active !== board.active) render();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

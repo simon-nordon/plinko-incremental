@@ -12,9 +12,13 @@
     <div id="app">
       <aside class="side">
         <div class="mode-control">
-          <label class="mode-toggle">
-            <span>Double or Nothing</span>
-            <input id="gameMode" type="checkbox" role="switch" aria-describedby="modeNote" />
+          <label class="field">
+            <span class="label">Game mode</span>
+            <select id="gameMode" aria-describedby="modeNote">
+              <option value="classic">Normal</option>
+              <option value="double">Double or Nothing</option>
+              <option value="oneball">1 Ball · Incremental</option>
+            </select>
           </label>
           <p id="modeNote" class="mode-note">Switching starts a new game.</p>
         </div>
@@ -32,6 +36,12 @@
           <span id="allInAmount" class="all-in-amount">$10.00</span>
         </button>
         <p id="allInRules" class="mode-note" hidden>First ball on the house, then wager your whole balance. Below 10% of your highest balance ends the life.</p>
+        <div id="oneBallStats" class="one-ball-stats" hidden>
+          <div><span>Balls in play</span><strong id="ballCapacity">0 / 5</strong></div>
+          <div><span>Ball value</span><strong id="ballValue">$1.00</strong></div>
+          <div class="capacity-track" aria-hidden="true"><div id="capacityFill"></div></div>
+          <p class="mode-note">Split balls use a slot too. Let the board clear to recharge special pegs and buckets.</p>
+        </div>
         <button id="openSkills" class="skills-button" hidden><span class="peg-symbol" aria-hidden="true">↟</span><span>Skill tree</span><span id="skillCount" class="skill-count">0 owned</span></button>
 
         <div id="boardSettings" class="board-settings" hidden>
@@ -96,7 +106,7 @@
         <button id="resetPhysics" class="reset-btn">Reset physics</button>
         <h3 class="tune-section">Development</h3>
         <button id="resetProgress" class="reset-btn dev-reset" aria-describedby="resetProgressStatus">Reset all progress</button>
-        <p id="resetProgressStatus" class="mode-note" role="status">Dev tool: clears both modes, upgrades and settings in this browser.</p>
+        <p id="resetProgressStatus" class="mode-note" role="status">Dev tool: clears all modes, upgrades and settings in this browser.</p>
       </aside>
 
       <div id="over" class="over" hidden>
@@ -114,19 +124,22 @@
     </div>
     <dialog id="skills" class="skills-dialog" aria-labelledby="skillsTitle">
       <header class="skills-heading">
-        <div><p class="eyebrow">Double or Nothing</p><h2 id="skillsTitle">Skill tree</h2></div>
+        <div><p id="skillsMode" class="eyebrow">Double or Nothing</p><h2 id="skillsTitle">Skill tree</h2></div>
         <button id="closeSkills" class="close-skills" aria-label="Close skill tree" autofocus>×</button>
       </header>
-      <p class="skills-intro">Buy permanent unlocks with winnings. Peg and bucket charges refresh and move each life.</p>
+      <p id="skillsIntro" class="skills-intro">Buy permanent unlocks with winnings. Peg and bucket charges refresh and move each life.</p>
       <div class="skills-body">
-        <div class="skill-map" aria-label="Double or Nothing skill tree">
-          <div class="tree-root">DOUBLE OR NOTHING</div>
+        <div id="skillMap" class="skill-map" aria-label="Double or Nothing skill tree">
+          <div id="skillRoot" class="tree-root">DOUBLE OR NOTHING</div>
           <div class="tree-branch"></div>
           <div class="skill-nodes">
+            <button id="selectcapacity" class="skill-node capacity-node" aria-pressed="false" hidden><span class="peg-symbol" aria-hidden="true">+</span><strong>Max Balls</strong><span id="capacityNodeLevel">Level 0</span></button>
+            <button id="selectvalue" class="skill-node starting-node" aria-pressed="false" hidden><span class="peg-symbol" aria-hidden="true">$</span><strong>Ball Value</strong><span id="valueNodeLevel">Level 0</span></button>
             <button id="selectbouncy" class="skill-node" aria-pressed="true"><span class="peg-symbol" aria-hidden="true">↟</span><strong>Bouncy Peg</strong><span id="bouncyNodeLevel">Level 0</span></button>
             <button id="selectsplit" class="skill-node split-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">⑂</span><strong>Split Peg</strong><span id="splitNodeLevel">Level 0</span></button>
             <button id="selectbucket" class="skill-node lucky-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">★</span><strong>Golden Bucket</strong><span id="bucketNodeLevel">Level 0</span></button>
             <button id="selectstarting" class="skill-node starting-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">$</span><strong>More Starting Money</strong><span id="startingNodeLevel">Level 0</span></button>
+            <button id="selectcashback" class="skill-node cashback-node" aria-pressed="false" hidden><span class="peg-symbol" aria-hidden="true">↩</span><strong>Cashback</strong><span id="cashbackNodeLevel">Level 0</span></button>
           </div>
           <span class="permanent-tag">Unlocks survive every life</span>
         </div>
@@ -143,7 +156,7 @@
           </div>
         </section>
       </div>
-      <p class="skills-save-note">Progress is saved in this browser, separately from Normal mode.</p>
+      <p class="skills-save-note">Permanent upgrades are saved in this browser, separately for each mode.</p>
     </dialog>
     <button id="devMode" class="dev-mode-toggle" type="button" aria-pressed="false" aria-controls="boardSettings tuningPanel">Dev mode</button>
     <script type="module" src="/src/main.ts"></script>

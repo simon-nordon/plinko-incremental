@@ -71,44 +71,14 @@ select {
   gap: 18px;
 }
 
-.mode-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 44px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.mode-toggle input {
-  appearance: none;
-  width: 42px;
-  height: 24px;
-  margin: 0;
-  flex: none;
-  border-radius: 12px;
-  background: var(--border);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.mode-toggle input::before {
-  content: '';
-  display: block;
-  width: 18px;
-  height: 18px;
-  margin: 3px;
-  border-radius: 50%;
-  background: white;
-  transition: transform 0.15s;
-}
-
-.mode-toggle input:checked { background: var(--green); }
-.mode-toggle input:checked::before { transform: translateX(18px); }
-.mode-toggle input:disabled { opacity: 0.5; cursor: not-allowed; }
-.mode-toggle input:focus-visible { outline: 2px solid white; outline-offset: 3px; }
+.mode-control { display: grid; gap: 8px; }
+.mode-control select { width: 100%; }
+.one-ball-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; border-radius: 8px; background: var(--field); }
+.one-ball-stats span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.one-ball-stats strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.one-ball-stats p, .capacity-track { grid-column: 1 / -1; }
+.capacity-track { height: 5px; overflow: hidden; background: var(--border); border-radius: 4px; }
+.capacity-track > div { height: 100%; background: #38bdf8; transition: width .15s; }
 
 .mode-note {
   margin: 0;
@@ -565,6 +535,10 @@ select:disabled {
 .lucky-node[aria-pressed='true'] { border-color: #facc15; }
 .split-node .peg-symbol { background: #38bdf8; border-color: #38bdf8; }
 .split-node[aria-pressed='true'] { border-color: #38bdf8; }
+.capacity-node .peg-symbol { background: #38bdf8; border-color: #38bdf8; }
+.capacity-node[aria-pressed='true'] { border-color: #38bdf8; }
+.cashback-node .peg-symbol { background: #fda4af; border-color: #fda4af; }
+.cashback-node[aria-pressed='true'] { border-color: #fda4af; }
 .skill-detail[hidden] { display: none; }
 .permanent-tag { color: var(--muted); font-size: 10px; margin-top: 16px; }
 .skill-detail { padding: 24px; min-width: 0; border-left: 1px solid var(--border); }

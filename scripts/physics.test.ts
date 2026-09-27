@@ -124,6 +124,43 @@ function seeded<T>(fn: () => T): T {
   try { return fn(); } finally { Math.random = original; }
 }
 
+test('One Ball physical splits respect capacity, keep blocked charges and pay full child value', () => seeded(() => {
+  const run = new GameRun('oneball');
+  let chargesUsed = 0;
+  let landedValue = 0;
+  let landedCost = 0;
+  const board = new Board(canvas, { onPegHit() {},
+    onDuplicate: (id, extra) => run.duplicate(id, extra),
+    onChargeUsed() { chargesUsed++; },
+    onLand(_bucket, _tier, id, cost, value) {
+      landedCost += cost;
+      landedValue += value;
+      run.settle(id, 1, cost, value);
+    },
+  });
+  board.fullValueSplits = true;
+  board.setLayout(16, []);
+  board.setPegCharges([], Array<string>(10).fill('0:1'));
+  board.drop(0, run.drop(0)!.id);
+  board.update(STEP);
+  Matter.Body.setPosition(state(board).balls[0].body, { x: 380.5, y: 0 });
+  Matter.Body.setVelocity(state(board).balls[0].body, { x: 0, y: 0 });
+  for (let i = 0; i < 120 && board.active < 5; i++) board.update(STEP);
+  assert.equal(board.active, 5);
+  assert.equal(run.activeBalls, 5);
+  assert.equal(chargesUsed, 4);
+  assert.equal(state(board).pegs.find(peg => peg.id === '0:1')!.split, 6);
+  for (let i = 0; i < 120 * 31 && board.active; i++) {
+    board.update(STEP);
+    assert.ok(board.active <= 5);
+    assert.equal(board.active, run.activeBalls);
+  }
+  assert.equal(board.active, 0);
+  assert.equal(landedCost, 1);
+  assert.equal(landedValue, 5);
+  assert.equal(run.balance, 9);
+}));
+
 /** A controlled, slightly off-centre impact on the top middle pin. */
 function rebound(bounce: number, changeAfterSpawn?: number, bouncy = false, startX = 380.5): { height: number; upwardSpeed: number; outwardSpeed: number; tangentSpeed: number } {
   let hits = 0;

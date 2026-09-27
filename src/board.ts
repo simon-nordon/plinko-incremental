@@ -64,6 +64,7 @@ interface Ball {
   tier: number;
   wagerId: number;
   costShare: number;
+  valueShare: number;
   /** radius it spawned with; the size slider only affects new balls */
   r: number;
   /** Extra pin impulse captured at spawn, just like restitution and size. */
@@ -85,12 +86,13 @@ interface FloatText {
 
 export interface BoardHooks {
   onPegHit(row: number, tier: number): void;
-  onLand(bucket: number, tier: number, wagerId: number, costShare: number): void;
-  onDuplicate?(wagerId: number): void;
+  onLand(bucket: number, tier: number, wagerId: number, costShare: number, valueShare: number): void;
+  onDuplicate?(wagerId: number, extraValueShare: number): boolean | void;
   onChargeUsed?(kind: 'bouncy' | 'split', pegId: string): void;
 }
 
 export class Board {
+  fullValueSplits = false;
   ballStyleOverride: { color: string; deep: string } | null = null;
   rows = 16;
   mults: number[] = [];
@@ -271,7 +273,7 @@ export class Board {
     });
     Matter.Composite.add(this.engine.world, body);
     const ball: Ball = {
-      body, tier, wagerId, costShare: 1, r, steps: 0, trail: [], previous: { ...body.position },
+      body, tier, wagerId, costShare: 1, valueShare: 1, r, steps: 0, trail: [], previous: { ...body.position },
       bumperKick: BUMPER_KICK * Math.max(0, this.physics.bounce - 1),
     };
     this.balls.push(ball);
@@ -325,8 +327,11 @@ export class Board {
       // Consume before processing the next contact, even if two balls hit in one step.
       // A stacked peg spends both charges on this impact.
       const bouncy = peg.bouncy;
-      const split = peg.split;
-      peg.bouncy = peg.split = 0;
+      let split = 0;
+      // Count accepted children before dividing shares. At capacity, keep unused charges.
+      while (split < peg.split && this.hooks.onDuplicate?.(ball.wagerId, this.fullValueSplits ? ball.valueShare : 0) !== false) split++;
+      peg.bouncy = 0;
+      peg.split -= split;
       for (let i = 0; i < bouncy; i++) this.hooks.onChargeUsed?.('bouncy', peg.id);
       for (let i = 0; i < split; i++) this.hooks.onChargeUsed?.('split', peg.id);
       const dx = ball.body.position.x - peg.body.position.x;
@@ -344,13 +349,13 @@ export class Board {
         y: v.y + (dy / d) * ball.bumperKick + ty * launch,
       });
       if (split > 0) {
-        // Every stacked charge adds one ball. Their shares total the original value.
+        // One Ball children each retain payout value, but still share the $1 cost.
         ball.costShare /= split + 1;
+        if (!this.fullValueSplits) ball.valueShare /= split + 1;
         const position = { ...ball.body.position };
         const velocity = { ...ball.body.velocity };
         Matter.Body.setVelocity(ball.body, { x: velocity.x - .4 * split, y: velocity.y });
         for (let i = 0; i < split; i++) {
-          this.hooks.onDuplicate?.(ball.wagerId);
           const body = Matter.Bodies.circle(position.x, position.y, ball.r, {
             restitution: ball.body.restitution, friction: ball.body.friction,
             frictionAir: ball.body.frictionAir, slop: ball.body.slop,
@@ -378,7 +383,7 @@ export class Board {
 
   private collectLanded(): void {
     for (let i = this.balls.length - 1; i >= 0; i--) {
-      const { body, tier, wagerId, r, steps, costShare } = this.balls[i];
+      const { body, tier, wagerId, r, steps, costShare, valueShare } = this.balls[i];
       if (body.position.y + r < H - 5 && steps < MAX_BALL_STEPS) continue;
       const x = body.position.x;
       const k = Math.max(0, Math.min(this.buckets - 1, this.lastRowX.findLastIndex((px) => px < x)));
@@ -386,7 +391,7 @@ export class Board {
       this.balls.splice(i, 1);
       this.ballById.delete(body.id);
       this.bucketAnim[k] = 1;
-      this.hooks.onLand(k, tier, wagerId, costShare);
+      this.hooks.onLand(k, tier, wagerId, costShare, valueShare);
     }
   }
 

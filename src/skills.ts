@@ -46,6 +46,7 @@ const targets = (kind: ChargeKind, rows: number): string[] => kind === 'bucket'
 export const luckyBucketReturn = (base: number): number => base * 2;
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>;
 type Levels = Record<SkillKind, number>;
+export interface ChargeSkills { level(kind: ChargeKind): number; }
 
 /** Only unlock counts persist. Prior saves remain available for migration. */
 export class SkillTree {
@@ -97,9 +98,9 @@ export class LifeSkills {
   private assigned: Record<ChargeKind, Map<string, number>> = { bouncy: new Map(), split: new Map(), bucket: new Map() };
   private charged: Record<ChargeKind, Map<string, number>> = { bouncy: new Map(), split: new Map(), bucket: new Map() };
 
-  constructor(readonly rows: number, skills: SkillTree | null, private random = Math.random) { this.sync(skills); }
+  constructor(readonly rows: number, skills: ChargeSkills | null, private random = Math.random) { this.sync(skills); }
   /** Newly purchased unlocks add one charge; previously consumed charges stay spent. */
-  sync(skills: SkillTree | null): void {
+  sync(skills: ChargeSkills | null): void {
     for (const kind of CHARGES) {
       const all = targets(kind, this.rows);
       const count = Math.min(skills?.level(kind) ?? 0, all.length);
