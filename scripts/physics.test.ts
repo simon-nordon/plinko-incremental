@@ -124,42 +124,51 @@ function seeded<T>(fn: () => T): T {
   try { return fn(); } finally { Math.random = original; }
 }
 
-test('One Ball physical splits respect capacity, keep blocked charges and pay full child value', () => seeded(() => {
-  const run = new GameRun('oneball');
-  let chargesUsed = 0;
+test('Prestige double pegs never run out, pay full child value and trigger once per lineage', () => seeded(() => {
+  const run = new GameRun('prestige');
+  const used: string[] = [];
   let landedValue = 0;
   let landedCost = 0;
   const board = new Board(canvas, { onPegHit() {},
     onDuplicate: (id, extra) => run.duplicate(id, extra),
-    onChargeUsed() { chargesUsed++; },
+    onChargeUsed(kind) { used.push(kind); },
     onLand(_bucket, _tier, id, cost, value) {
       landedCost += cost;
       landedValue += value;
       run.settle(id, 1, cost, value);
     },
   });
-  board.fullValueSplits = true;
+  board.fullValueSplits = board.persistentPegs = true;
   board.setLayout(16, []);
-  board.setPegCharges([], Array<string>(10).fill('0:1'));
-  board.drop(0, run.drop(0)!.id);
-  board.update(STEP);
-  Matter.Body.setPosition(state(board).balls[0].body, { x: 380.5, y: 0 });
-  Matter.Body.setVelocity(state(board).balls[0].body, { x: 0, y: 0 });
-  for (let i = 0; i < 120 && board.active < 5; i++) board.update(STEP);
-  assert.equal(board.active, 5);
-  assert.equal(run.activeBalls, 5);
-  assert.equal(chargesUsed, 4);
-  assert.equal(state(board).pegs.find(peg => peg.id === '0:1')!.split, 6);
-  for (let i = 0; i < 120 * 31 && board.active; i++) {
+  board.setPegCharges([], ['0:1']);
+  for (let drop = 0; drop < 2; drop++) {
+    board.drop(0, run.drop(0)!.id);
     board.update(STEP);
-    assert.ok(board.active <= 5);
-    assert.equal(board.active, run.activeBalls);
+    Matter.Body.setPosition(state(board).balls[0].body, { x: 380.5, y: 0 });
+    Matter.Body.setVelocity(state(board).balls[0].body, { x: 0, y: 0 });
+    for (let i = 0; i < 120 * 31 && board.active; i++) board.update(STEP);
+    assert.equal(board.active, 0);
   }
-  assert.equal(board.active, 0);
-  assert.equal(landedCost, 1);
-  assert.equal(landedValue, 5);
-  assert.equal(run.balance, 9);
+  assert.deepEqual(used, [], 'persistent pegs are never consumed');
+  assert.equal(state(board).pegs.find(peg => peg.id === '0:1')!.split, 1);
+  assert.equal(landedCost, 2);
+  assert.equal(landedValue, 4, 'each drop doubled exactly once');
+  assert.equal(run.balance, 7);
 }));
+
+test('Bouncy Balls spawn with 200% bounciness regardless of the Tuning slider', () => {
+  const board = new Board(canvas, { onPegHit() {}, onLand() {} });
+  board.setLayout(16, []);
+  board.drop(0, 0, true);
+  board.drop(0, 0, false);
+  for (let i = 0; i < 60 && state(board).balls.length < 2; i++) board.update(STEP);
+  const [bouncy, normal] = state(board).balls as unknown as { bouncy: boolean; bumperKick: number; body: Matter.Body }[];
+  assert.equal(bouncy.bouncy, true);
+  assert.equal(bouncy.body.restitution, 1);
+  assert.ok(bouncy.bumperKick > 0);
+  assert.equal(normal.bouncy, false);
+  assert.equal(normal.bumperKick, 0);
+});
 
 /** A controlled, slightly off-centre impact on the top middle pin. */
 function rebound(bounce: number, changeAfterSpawn?: number, bouncy = false, startX = 380.5): { height: number; upwardSpeed: number; outwardSpeed: number; tangentSpeed: number } {

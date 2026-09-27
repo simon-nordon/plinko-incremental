@@ -15,9 +15,9 @@
           <label class="field">
             <span class="label">Game mode</span>
             <select id="gameMode" aria-describedby="modeNote">
+              <option value="prestige">Prestige</option>
               <option value="classic">Normal</option>
               <option value="double">Double or Nothing</option>
-              <option value="oneball">1 Ball · Incremental</option>
             </select>
           </label>
           <p id="modeNote" class="mode-note">Switching starts a new game.</p>
@@ -36,30 +36,18 @@
           <span id="allInAmount" class="all-in-amount">$10.00</span>
         </button>
         <p id="allInRules" class="mode-note" hidden>First ball on the house, then wager your whole balance. Below 10% of your highest balance ends the life.</p>
-        <div id="oneBallStats" class="one-ball-stats" hidden>
-          <div><span>Balls in play</span><strong id="ballCapacity">0 / 5</strong></div>
-          <div><span>Ball value</span><strong id="ballValue">$1.00</strong></div>
-          <div class="capacity-track" aria-hidden="true"><div id="capacityFill"></div></div>
-          <p class="mode-note">Split balls use a slot too. Let the board clear to recharge special pegs and buckets.</p>
+        <div id="prestigeGoal" class="prestige-goal" hidden>
+          <span id="prestigeGoalLabel" class="label">Next debt</span>
+          <strong id="prestigeGoalTitle"></strong>
+          <div class="goal-track" aria-hidden="true"><div id="prestigeGoalFill"></div></div>
+          <span id="prestigeGoalNote" class="mode-note"></span>
         </div>
+        <button id="cashOut" class="cash-out" hidden>
+          <span class="cash-out-label">Cash out</span>
+          <span id="cashOutAmount" class="cash-out-amount">$0.00</span>
+          <span id="cashOutNote" class="cash-out-note">Bank it and visit the skill tree</span>
+        </button>
         <button id="openSkills" class="skills-button" hidden><span class="peg-symbol" aria-hidden="true">↟</span><span>Skill tree</span><span id="skillCount" class="skill-count">0 owned</span></button>
-
-        <div id="boardSettings" class="board-settings" hidden>
-          <label class="field">
-            <span class="label">Risk</span>
-            <select id="risk">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="extreme">Extreme</option>
-            </select>
-          </label>
-
-          <label class="field">
-            <span class="label">Rows</span>
-            <select id="rows"></select>
-          </label>
-        </div>
 
         <div class="side-foot">
           <button id="mute" class="icon-btn" title="Toggle sound">🔊</button>
@@ -69,12 +57,28 @@
       </aside>
 
       <main class="stage">
-        <canvas id="board"></canvas>
+        <canvas id="board" role="img" aria-label="Plinko board"></canvas>
+        <div id="bucketControls" class="bucket-controls" role="group" aria-label="Bucket payout tuning" hidden></div>
         <div id="history" class="history"></div>
       </main>
 
       <aside id="tuningPanel" class="tune" hidden>
         <h3>Tuning</h3>
+        <label class="field">
+          <span class="label">Risk</span>
+          <select id="risk">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="extreme">Extreme</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="label">Rows</span>
+          <select id="rows"></select>
+        </label>
+        <p id="bucketTuningNote" class="mode-note">Use + / − below each bucket to change its base payout by 0.1×. Golden buckets still double it.</p>
+        <button id="resetPayouts" class="reset-btn">Reset bucket payouts</button>
         <div id="luckControls">
         <label class="field">
           <span class="label">Luck <output id="luckValue"></output></span>
@@ -133,13 +137,10 @@
           <div id="skillRoot" class="tree-root">DOUBLE OR NOTHING</div>
           <div class="tree-branch"></div>
           <div class="skill-nodes">
-            <button id="selectcapacity" class="skill-node capacity-node" aria-pressed="false" hidden><span class="peg-symbol" aria-hidden="true">+</span><strong>Max Balls</strong><span id="capacityNodeLevel">Level 0</span></button>
-            <button id="selectvalue" class="skill-node starting-node" aria-pressed="false" hidden><span class="peg-symbol" aria-hidden="true">$</span><strong>Ball Value</strong><span id="valueNodeLevel">Level 0</span></button>
             <button id="selectbouncy" class="skill-node" aria-pressed="true"><span class="peg-symbol" aria-hidden="true">↟</span><strong>Bouncy Peg</strong><span id="bouncyNodeLevel">Level 0</span></button>
             <button id="selectsplit" class="skill-node split-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">⑂</span><strong>Split Peg</strong><span id="splitNodeLevel">Level 0</span></button>
             <button id="selectbucket" class="skill-node lucky-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">★</span><strong>Golden Bucket</strong><span id="bucketNodeLevel">Level 0</span></button>
             <button id="selectstarting" class="skill-node starting-node" aria-pressed="false"><span class="peg-symbol" aria-hidden="true">$</span><strong>More Starting Money</strong><span id="startingNodeLevel">Level 0</span></button>
-            <button id="selectcashback" class="skill-node cashback-node" aria-pressed="false" hidden><span class="peg-symbol" aria-hidden="true">↩</span><strong>Cashback</strong><span id="cashbackNodeLevel">Level 0</span></button>
           </div>
           <span class="permanent-tag">Unlocks survive every life</span>
         </div>
@@ -158,7 +159,55 @@
       </div>
       <p class="skills-save-note">Permanent upgrades are saved in this browser, separately for each mode.</p>
     </dialog>
-    <button id="devMode" class="dev-mode-toggle" type="button" aria-pressed="false" aria-controls="boardSettings tuningPanel">Dev mode</button>
+    <dialog id="prestige" class="tree-dialog" aria-labelledby="prestigeTitle">
+      <div class="tree-sky" aria-hidden="true"></div>
+      <div id="treeViewport" class="tree-viewport">
+        <div id="prestigeMap" class="tree-world" role="group" aria-label="Prestige skill tree"></div>
+      </div>
+      <header class="tree-top">
+        <div class="tree-brand">
+          <p class="tree-eyebrow">Prestige</p>
+          <h2 id="prestigeTitle">Skill Tree</h2>
+        </div>
+        <div class="tree-wallet" id="treeWallet">
+          <span class="tree-coin" aria-hidden="true">$</span>
+          <span class="tree-wallet-text"><span>Banked</span><strong id="walletAmount">$0.00</strong></span>
+        </div>
+        <div class="tree-actions">
+          <button id="startRun" class="tree-cta" type="button">Start new run</button>
+          <button id="closePrestige" class="tree-close" type="button" aria-label="Close skill tree"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </div>
+      </header>
+      <p id="prestigeMessage" class="tree-toast" role="status" aria-live="polite" hidden></p>
+      <div class="tree-zoom" role="group" aria-label="Zoom">
+        <button id="treeZoomIn" type="button" aria-label="Zoom in">+</button>
+        <button id="treeZoomOut" type="button" aria-label="Zoom out">−</button>
+        <button id="treeFit" type="button" aria-label="Fit the whole tree"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      </div>
+      <p class="tree-hint">Drag to explore · Scroll to zoom</p>
+      <aside id="treeDetail" class="tree-detail" aria-labelledby="prestigeSkillTitle">
+        <div class="detail-head">
+          <span id="prestigeSkillIcon" class="detail-icon"></span>
+          <div>
+            <p id="prestigeSkillBranch" class="detail-branch"></p>
+            <h3 id="prestigeSkillTitle"></h3>
+          </div>
+        </div>
+        <p id="prestigeSkillDescription" class="detail-description"></p>
+        <div id="prestigePips" class="detail-pips" aria-hidden="true"></div>
+        <dl class="detail-stats">
+          <div><dt id="prestigeLevelLabel">Level</dt><dd id="prestigeSkillLevel"></dd></div>
+          <div><dt>Banked</dt><dd id="prestigeSkillWallet"></dd></div>
+        </dl>
+        <div class="detail-effects">
+          <p id="prestigeSkillCurrent" class="detail-now"></p>
+          <p id="prestigeSkillNext" class="detail-next"></p>
+        </div>
+        <button id="buyPrestige" class="detail-buy" type="button">Buy</button>
+        <p id="prestigeStatus" class="detail-status" role="status" aria-live="polite"></p>
+      </aside>
+    </dialog>
+    <button id="devMode" class="dev-mode-toggle" type="button" aria-pressed="false" aria-controls="tuningPanel bucketControls">Dev mode</button>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -38,6 +38,11 @@ const AIR_FRICTION: Record<number, number> = {
 const BUMPER_KICK = 1.5;
 /** Fixed tangential impulse for a charged Bouncy Peg, including grazing contacts. */
 export const BOUNCY_PEG_KICK = 12;
+/** Prestige Bouncy Balls spawn with 200% bounciness, whatever the Tuning slider says. */
+export const BOUNCY_BALL_BOUNCE = 2;
+const BOUNCY_BALL_STYLE = { color: '#f472b6', deep: '#9d174d' };
+/** Seconds the Bucket Slider rests over each bucket. */
+export const SLIDER_STEP = .45;
 /** Speed limit in Matter's px per 1/60 s; each 120 Hz step travels at most 8 px. */
 const MAX_SPEED = 16;
 const STEP_MS = 1000 / 120;
@@ -69,6 +74,9 @@ interface Ball {
   r: number;
   /** Extra pin impulse captured at spawn, just like restitution and size. */
   bumperKick: number;
+  bouncy: boolean;
+  /** Persistent pegs already used by this ball's lineage. */
+  triggered: Set<string>;
   steps: number;
   previous: Matter.Vector;
   trail: number[];
@@ -93,6 +101,12 @@ export interface BoardHooks {
 
 export class Board {
   fullValueSplits = false;
+  /** Prestige pegs never run out; each affects a ball lineage once. */
+  persistentPegs = false;
+  skullZeroBuckets = false;
+  sliderEnabled = false;
+  /** Screen-space room below the board for developer payout buttons. */
+  bucketControlHeight = 0;
   ballStyleOverride: { color: string; deep: string } | null = null;
   rows = 16;
   mults: number[] = [];
@@ -105,10 +119,16 @@ export class Board {
   private wallCos = 1;
   private bucketAnim: number[] = [];
   private luckyBuckets = new Set<string>();
+  /** Beginner's Luck buckets and the hits they can still take. */
+  private beginnerBuckets = new Map<number, number>();
+  private sliderIndex = 0;
+  private sliderDir = 1;
+  private sliderTimer = 0;
+  private sliderDraw = 0;
   private balls: Ball[] = [];
   private ballById = new Map<number, Ball>();
   /** Drops waiting to enter the board, oldest first. */
-  private queue: { tier: number; wagerId: number }[] = [];
+  private queue: { tier: number; wagerId: number; bouncy: boolean }[] = [];
   private spawnWait = 0;
   private particles: Particle[] = [];
   private texts: FloatText[] = [];
@@ -243,8 +263,32 @@ export class Board {
     this.luckyBuckets = new Set(ids);
   }
 
-  drop(tier: number, wagerId = 0): void {
-    this.queue.push({ tier, wagerId });
+  setBeginnerBuckets(charges: ReadonlyMap<number, number>): void {
+    this.beginnerBuckets = new Map([...charges].filter(([, left]) => left > 0));
+  }
+
+  /** The bucket currently doubled by the Bucket Slider, or -1. */
+  get sliderBucket(): number {
+    return this.sliderEnabled ? this.sliderIndex : -1;
+  }
+
+  /** Chips fly off a Beginner's Luck bucket; the final hit shatters it. */
+  crackBucket(k: number, broken: boolean): void {
+    const x = this.bucketX(k);
+    const g = this.pinGap;
+    for (let i = 0; i < (broken ? 34 : 10); i++) {
+      const a = -Math.PI * Math.random();
+      const speed = (broken ? 5 : 3) * g * (0.3 + Math.random());
+      const life = 0.5 + Math.random() * 0.5;
+      this.particles.push({ x: x + (Math.random() - .5) * g * .8, y: H + BUCKET_H / 2, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+        life, max: life, color: Math.random() < .5 ? '#6ee7b7' : '#d1fae5', size: g * (broken ? .12 : .08) * (0.5 + Math.random()) });
+    }
+    this.bucketText(k, broken ? 'BROKEN' : 'CRACK', broken ? '#fca5a5' : '#a7f3d0', .38);
+    if (broken) this.addShake(4);
+  }
+
+  drop(tier: number, wagerId = 0, bouncy = false): void {
+    this.queue.push({ tier, wagerId, bouncy });
   }
 
   /** Spawns the next queued ball once the gap has passed and the chute is clear. */
@@ -261,10 +305,11 @@ export class Board {
     const x = W / 2 + (Math.random() * 2 - 1) * spread;
     const blocked = this.balls.some((b) => Math.hypot(b.body.position.x - x, b.body.position.y) < r + b.r + 2);
     if (blocked) return;
-    const { tier, wagerId } = this.queue.shift()!;
+    const { tier, wagerId, bouncy } = this.queue.shift()!;
     this.spawnWait = SPAWN_GAP;
+    const bounce = bouncy ? BOUNCY_BALL_BOUNCE : this.physics.bounce;
     const body = Matter.Bodies.circle(x, 0, r, {
-      restitution: Math.min(1, this.physics.bounce),
+      restitution: Math.min(1, bounce),
       friction: 0.5,
       frictionAir: AIR_FRICTION[this.rows],
       slop: 0.01,
@@ -274,7 +319,7 @@ export class Board {
     Matter.Composite.add(this.engine.world, body);
     const ball: Ball = {
       body, tier, wagerId, costShare: 1, valueShare: 1, r, steps: 0, trail: [], previous: { ...body.position },
-      bumperKick: BUMPER_KICK * Math.max(0, this.physics.bounce - 1),
+      bumperKick: BUMPER_KICK * Math.max(0, bounce - 1), bouncy, triggered: new Set(),
     };
     this.balls.push(ball);
     this.ballById.set(body.id, ball);
@@ -300,6 +345,7 @@ export class Board {
       b.trail.push(p.x, p.y);
       if (b.trail.length > TRAIL * 2) b.trail.splice(0, 2);
     }
+    this.updateSlider(dt);
     for (const p of this.pegs) p.flash = Math.max(0, p.flash - dt * 3.5);
     for (let i = 0; i < this.bucketAnim.length; i++) this.bucketAnim[i] = Math.max(0, this.bucketAnim[i] - dt * 4);
     this.shake = Math.max(0, this.shake - dt * 30);
@@ -322,18 +368,36 @@ export class Board {
     }
   }
 
+  /** Hop one bucket at a time, bouncing back at either end. */
+  private updateSlider(dt: number): void {
+    if (!this.sliderEnabled || this.buckets < 2) return;
+    this.sliderIndex = Math.min(this.sliderIndex, this.buckets - 1);
+    this.sliderTimer += dt;
+    while (this.sliderTimer >= SLIDER_STEP) {
+      this.sliderTimer -= SLIDER_STEP;
+      if (this.sliderIndex + this.sliderDir < 0 || this.sliderIndex + this.sliderDir >= this.buckets) this.sliderDir *= -1;
+      this.sliderIndex += this.sliderDir;
+    }
+    this.sliderDraw += (this.sliderIndex - this.sliderDraw) * Math.min(1, dt * 18);
+  }
+
   private applyBumpers(): void {
     for (const { ball, peg } of this.pinContacts) {
+      // Persistent pegs affect each lineage once, so children cannot re-trigger on spawn.
+      const fresh = !this.persistentPegs || !ball.triggered.has(peg.id);
+      if (this.persistentPegs && (peg.bouncy || peg.split)) ball.triggered.add(peg.id);
       // Consume before processing the next contact, even if two balls hit in one step.
       // A stacked peg spends both charges on this impact.
-      const bouncy = peg.bouncy;
+      const bouncy = fresh ? peg.bouncy : 0;
       let split = 0;
       // Count accepted children before dividing shares. At capacity, keep unused charges.
-      while (split < peg.split && this.hooks.onDuplicate?.(ball.wagerId, this.fullValueSplits ? ball.valueShare : 0) !== false) split++;
-      peg.bouncy = 0;
-      peg.split -= split;
-      for (let i = 0; i < bouncy; i++) this.hooks.onChargeUsed?.('bouncy', peg.id);
-      for (let i = 0; i < split; i++) this.hooks.onChargeUsed?.('split', peg.id);
+      while (fresh && split < peg.split && this.hooks.onDuplicate?.(ball.wagerId, this.fullValueSplits ? ball.valueShare : 0) !== false) split++;
+      if (!this.persistentPegs) {
+        peg.bouncy = 0;
+        peg.split -= split;
+        for (let i = 0; i < bouncy; i++) this.hooks.onChargeUsed?.('bouncy', peg.id);
+        for (let i = 0; i < split; i++) this.hooks.onChargeUsed?.('split', peg.id);
+      }
       const dx = ball.body.position.x - peg.body.position.x;
       const dy = ball.body.position.y - peg.body.position.y;
       const d = Math.hypot(dx, dy) || 1;
@@ -349,7 +413,7 @@ export class Board {
         y: v.y + (dy / d) * ball.bumperKick + ty * launch,
       });
       if (split > 0) {
-        // One Ball children each retain payout value, but still share the $1 cost.
+        // Prestige children each retain payout value, but still share the purchase cost.
         ball.costShare /= split + 1;
         if (!this.fullValueSplits) ball.valueShare /= split + 1;
         const position = { ...ball.body.position };
@@ -361,7 +425,7 @@ export class Board {
             frictionAir: ball.body.frictionAir, slop: ball.body.slop,
             collisionFilter: { category: BALL, mask: PIN },
           });
-          const child: Ball = { ...ball, body, previous: position, trail: [] };
+          const child: Ball = { ...ball, body, previous: position, trail: [], triggered: new Set(ball.triggered) };
           Matter.Body.setVelocity(body, { x: velocity.x + .8 * (i + 1) - .4 * split, y: velocity.y });
           Matter.Composite.add(this.engine.world, body);
           this.balls.push(child);
@@ -445,9 +509,17 @@ export class Board {
       this.canvas.height = Math.round(h * dpr);
     }
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.scale = Math.min(w / W, h / WORLD_H);
+    const availableHeight = Math.max(1, h - this.bucketControlHeight);
+    this.scale = Math.min(w / W, availableHeight / WORLD_H);
     this.ox = (w - W * this.scale) / 2;
-    this.oy = (h - WORLD_H * this.scale) / 2;
+    this.oy = (availableHeight - WORLD_H * this.scale) / 2;
+  }
+
+  /** Align HTML controls with the rendered buckets, including letterboxing on resize. */
+  get bucketControlsLayout(): { left: number; top: number; width: number } {
+    return { left: this.ox + this.lastRowX[0] * this.scale,
+      top: this.oy + WORLD_H * this.scale + 4,
+      width: this.pinGap * this.buckets * this.scale };
   }
 
   render(): void {
@@ -487,7 +559,7 @@ export class Board {
     this.renderBuckets(X, Y);
 
     for (const b of this.balls) {
-      const { color, deep } = this.ballStyleOverride ?? ballStyle(b.tier);
+      const { color, deep } = b.bouncy ? BOUNCY_BALL_STYLE : this.ballStyleOverride ?? ballStyle(b.tier);
       for (let i = 0; i < b.trail.length - 2; i += 2) {
         const a = (i / 2 + 1) / (b.trail.length / 2);
         ctx.globalAlpha = a * 0.25;
@@ -509,6 +581,13 @@ export class Board {
       ctx.beginPath();
       ctx.arc(bx, by, r, 0, Math.PI * 2);
       ctx.fill();
+      if (b.bouncy) {
+        ctx.strokeStyle = 'rgba(244,114,182,.55)';
+        ctx.lineWidth = Math.max(1, s * 1.2);
+        ctx.beginPath();
+        ctx.arc(bx, by, r * 1.45, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     for (const p of this.particles) {
@@ -543,6 +622,7 @@ export class Board {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let k = 0; k < this.buckets; k++) {
+      const skull = this.skullZeroBuckets && this.mults[k] === 0;
       const cx = this.bucketX(k);
       const bounce = this.bucketAnim[k];
       const x0 = X(cx - w / 2);
@@ -551,7 +631,7 @@ export class Board {
       ctx.fillStyle = bucketColor(k, this.buckets, 1);
       roundRect(ctx, x0, y0 + 4 * s, w * s, h * s, r);
       ctx.fill();
-      ctx.fillStyle = bucketColor(k, this.buckets);
+      ctx.fillStyle = skull ? '#452436' : bucketColor(k, this.buckets);
       roundRect(ctx, x0, y0, w * s, h * s, r);
       ctx.fill();
       if (this.luckyBuckets.has(String(k))) {
@@ -561,17 +641,63 @@ export class Board {
         ctx.lineWidth = 2 * s;
         ctx.stroke();
       }
+      const beginner = this.beginnerBuckets.get(k);
+      if (beginner) {
+        ctx.fillStyle = '#059669';
+        ctx.fill();
+        ctx.strokeStyle = '#a7f3d0';
+        ctx.lineWidth = 1.5 * s;
+        ctx.stroke();
+        drawCracks(ctx, x0, y0, w * s, h * s, 3 - beginner, k);
+      }
       if (bounce > 0) {
         ctx.fillStyle = `rgba(255,255,255,${0.35 * bounce})`;
         ctx.fill();
       }
-      const label = fmtMult(this.mults[k] ?? 0);
-      const fs = Math.min(h * 0.5, (w * 1.6) / Math.max(3, label.length)) * s;
-      ctx.font = `800 ${Math.round(fs)}px Rubik, system-ui, sans-serif`;
+      const label = skull ? '💀' : fmtMult(this.mults[k] ?? 0);
+      const fs = (skull ? h * .75 : Math.min(h * 0.5, (w * 1.6) / Math.max(3, label.length))) * s;
+      ctx.font = `800 ${Math.round(fs)}px Rubik, "Segoe UI Emoji", system-ui, sans-serif`;
       ctx.fillStyle = '#ffffff';
       ctx.fillText(label, X(cx), y0 + (h * s) / 2 + 1);
     }
+    if (this.sliderEnabled) {
+      // A frame around the doubled bucket, gliding between hops.
+      const cx = this.lastRowX[0] + this.pinGap * (this.sliderDraw + .5);
+      const y0 = Y(H - 16);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2 * s;
+      roundRect(ctx, X(cx - this.pinGap * .52), y0, this.pinGap * 1.04 * s, (BUCKET_H + 16) * s, 5 * s);
+      ctx.stroke();
+      ctx.fillStyle = '#facc15';
+      roundRect(ctx, X(cx) - 11 * s, y0 - 7 * s, 22 * s, 12 * s, 4 * s);
+      ctx.fill();
+      ctx.fillStyle = '#1f2937';
+      ctx.font = `800 ${Math.round(8 * s)}px Rubik, system-ui, sans-serif`;
+      ctx.fillText('×2', X(cx), y0 - s);
+    }
   }
+}
+
+/** Deterministic jagged cracks, one more per hit taken. */
+function drawCracks(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, count: number, seed: number): void {
+  if (count <= 0) return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(6,30,22,.85)';
+  ctx.lineWidth = Math.max(1, w / 22);
+  ctx.lineJoin = 'round';
+  for (let c = 0; c < count; c++) {
+    let n = (seed + 1) * 97 + c * 31;
+    const rand = () => (n = (n * 1103515245 + 12345) % 2147483648) / 2147483648;
+    let px = x + w * (c === 0 ? .3 + rand() * .15 : .55 + rand() * .15);
+    ctx.beginPath();
+    ctx.moveTo(px, y);
+    for (let i = 1; i <= 4; i++) {
+      px = Math.max(x + 1, Math.min(x + w - 1, px + (rand() - .5) * w * .35));
+      ctx.lineTo(px, y + (h * i) / 4);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {

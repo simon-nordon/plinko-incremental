@@ -5,7 +5,7 @@ export function resetAllProgress(storage: ProgressStorage): void {
   const keys: string[] = [];
   for (let i = 0; i < storage.length; i++) {
     const key = storage.key(i);
-    if (key === 'plinko-prefs' || key?.startsWith('plinko-prefs-') || key?.startsWith('plinko-skills-')) {
+    if (key === 'plinko-prefs' || key?.startsWith('plinko-prefs-') || key?.startsWith('plinko-skills-') || key?.startsWith('plinko-prestige-')) {
       keys.push(key);
     }
   }
